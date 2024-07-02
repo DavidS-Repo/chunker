@@ -55,15 +55,15 @@ chunk-system:
 
 ### **Performance Examples:** 
 - **ParallelTasksMultiplier = 1:**
-- **Command:** `pregen 1 5s world 200c` 
+- **Command:** `pregen 1 5s world 100c` 
 - **Chunks per second:** ~100-130 (on a 5600x CPU, depending on server activity and other system tasks) 
-- **Time:** Finished in 2.75 minutes 
+- **Time:** Finished in 1.33 minutes 
 
 ![ParallelTasksMultiplier = 1](https://www.toolsnexus.com/mc/1.33min.png) 
 - **ParallelTasksMultiplier = 6:**
-- **Command:** `pregen 6 5s world 200c`
+- **Command:** `pregen 6 5s world 100c`
 - **Chunks per second:** ~130-200 (on a 5600x CPU, depending on server activity and other system tasks)
-- **Time:** Finished in 1.7 minutes
+- **Time:** Finished in 0.916 minutes
 
 ![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/0.916min.png)
 #### **Summary:** 
