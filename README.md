@@ -90,6 +90,6 @@ chunk-system:
 ## Permissions:
 
 (**Default OP**)
-- `sg.pregen`: Grants permission to use the pre-generation command with customizable parameters.
-- `sg.pregenoff`: Grants permission to disable pre-generation using the `/pregenoff` command.
-- `sg.*`: Provides access to all SkyGrid commands.
+- `chunker.pregen`: Grants permission to use the pre-generation command with customizable parameters.
+- `chunker.pregenoff`: Grants permission to disable pre-generation using the `/pregenoff` command.
+- `chunker.*`: Provides access to all Chunker commands.
