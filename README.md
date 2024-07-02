@@ -56,16 +56,16 @@ chunk-system:
 ### **Performance Examples:** 
 - **ParallelTasksMultiplier = 1:**
 - **Command:** `pregen 1 5s world 200c` 
-- **Chunks per second:** ~150-350 (on a 5600x CPU, depending on server activity and other system tasks) 
+- **Chunks per second:** ~100-130 (on a 5600x CPU, depending on server activity and other system tasks) 
 - **Time:** Finished in 2.75 minutes 
 
-![ParallelTasksMultiplier = 1](https://www.toolsnexus.com/mc/2.75min.png) 
+![ParallelTasksMultiplier = 1](https://www.toolsnexus.com/mc/1.33min.png) 
 - **ParallelTasksMultiplier = 6:**
 - **Command:** `pregen 6 5s world 200c`
-- **Chunks per second:** ~250-600 (on a 5600x CPU, depending on server activity and other system tasks)
+- **Chunks per second:** ~130-200 (on a 5600x CPU, depending on server activity and other system tasks)
 - **Time:** Finished in 1.7 minutes
 
-![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/1.7min.png)
+![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/0.916min.png)
 #### **Summary:** 
 - **Load Management:** Determines the load on your server.
 - **Small Number:** Lower load, fewer chunks per second.
