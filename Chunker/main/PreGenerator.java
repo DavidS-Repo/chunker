@@ -285,25 +285,18 @@ public class PreGenerator implements Listener {
 		if (scheduledChunks.contains(chunkId)) {
 			return;
 		}
-		final int[] taskIdHolder = new int[1];
-		BukkitScheduler scheduler = Bukkit.getScheduler();
-		int taskId = scheduler.runTaskTimer(plugin, new Runnable() {
-			@Override
-			public void run() {
-				try {
-					if (chunk.getLoadLevel() == Chunk.LoadLevel.ENTITY_TICKING && !playerLoadedChunks.contains(chunkId)) {
-						chunk.getWorld().unloadChunk(chunk.getX(), chunk.getZ(), true);
-					} else {
-						scheduledChunks.remove(chunkId);
-						scheduler.cancelTask(taskIdHolder[0]);
-					}
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-		}, 0L, 0L).getTaskId();
-		taskIdHolder[0] = taskId;
 		scheduledChunks.add(chunkId);
+		CompletableFuture.runAsync(() -> {
+			try {
+				while (chunk.getLoadLevel() == Chunk.LoadLevel.ENTITY_TICKING && !playerLoadedChunks.contains(chunkId)) {
+					chunk.getWorld().unloadChunk(chunk.getX(), chunk.getZ(), true);
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			} finally {
+				scheduledChunks.remove(chunkId);
+			}
+		}, Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory()));
 	}
 
 	@EventHandler(priority = EventPriority.HIGHEST)
