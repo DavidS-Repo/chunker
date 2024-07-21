@@ -288,7 +288,7 @@ public class PreGenerator implements Listener {
 		scheduledChunks.add(chunkId);
 		CompletableFuture.runAsync(() -> {
 			try {
-				while (chunk.getLoadLevel() == Chunk.LoadLevel.ENTITY_TICKING && !playerLoadedChunks.contains(chunkId)) {
+				while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING && !playerLoadedChunks.contains(chunkId)) {
 					chunk.getWorld().unloadChunk(chunk.getX(), chunk.getZ(), true);
 				}
 			} catch (Exception e) {
