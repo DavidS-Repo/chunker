@@ -9,7 +9,6 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
-import org.bukkit.event.world.ChunkPopulateEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.*;
@@ -48,7 +47,7 @@ public class PreGenerator implements Listener {
 
 	private Semaphore semaphore;
 
-	private int x, z, dx, dz, currentX, currentZ;;
+	private int x, z, dx, dz, currentX, currentZ;
 	private LongAdder totalChunksProcessed = new LongAdder();
 	private int chunksThisCycle = 0, localChunksThisCycle = 0;
 
@@ -63,6 +62,9 @@ public class PreGenerator implements Listener {
 	private final Set<String> playerLoadedChunks = ConcurrentHashMap.newKeySet();
 
 	private static final boolean IS_PAPER = detectPaper();
+
+	private long TimerStart = 0;
+	private long TimerEnd = 0;
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -115,7 +117,6 @@ public class PreGenerator implements Listener {
 		if (scheduler != null && !scheduler.isShutdown()) {
 			scheduler.shutdownNow();
 		}
-		AsyncExecutor.shutdown();
 	}
 
 	private void startPrintInfoTimer() {
@@ -131,16 +132,36 @@ public class PreGenerator implements Listener {
 	}
 
 	private void stopPrintInfoTimer() {
-		if (printInfoTask != null) {
-			printInfoTask.cancel(true);
-			printInfoTask = null;
-		}
+	    if (printInfoTask != null) {
+	        printInfoTask.cancel(true);
+	        printInfoTask = null;
+	        long elapsedTime = (TimerEnd - TimerStart) / 1000;
+	        Bukkit.broadcastMessage("Total time: " + ChatColor.GOLD + formatElapsedTime(elapsedTime) + ChatColor.RESET);
+	        TimerStart = 0;
+	        TimerEnd = 0;
+	    }
+	}
+	
+	private String formatElapsedTime(long seconds) {
+	    long hours = seconds / 3600, minutes = (seconds % 3600) / 60, remainingSeconds = seconds % 60;;
+	    StringBuilder formattedTime = new StringBuilder();
+	    if (hours > 0) {
+	        formattedTime.append(hours).append(" Hour").append(hours > 1 ? "s" : "").append(" ");
+	    }
+	    if (minutes > 0) {
+	        formattedTime.append(minutes).append(" Minute").append(minutes > 1 ? "s" : "").append(" ");
+	    }
+	    if (remainingSeconds > 0 || formattedTime.length() == 0) {
+	        formattedTime.append(remainingSeconds).append(" Second").append(remainingSeconds != 1 ? "s" : "").append(" ");
+	    }
+	    return formattedTime.toString().trim();
 	}
 
 	private void startGeneration() {
 		for (int i = 0; i < cores; i++) {
 			generateChunkBatch();
 		}
+		TimerStart = System.currentTimeMillis();
 	}
 
 	private void createParallel() {
@@ -186,41 +207,15 @@ public class PreGenerator implements Listener {
 							if (!complete) {
 								complete = true;
 								lastPrint = true;
+								TimerEnd = System.currentTimeMillis();
 								terminate();
-								Bukkit.broadcastMessage(RADIUS_EXCEEDED_MESSAGE);
+								return;
 							}
 						}
 					}
 				});
 			}
 			saveProcessedChunks();
-		}, AsyncExecutor);
-	}
-
-	@EventHandler(priority = EventPriority.HIGHEST)
-	private void onChunkPopulate(ChunkPopulateEvent event) {
-		if (!enabled) {
-			return;
-		}
-		Chunk chunk = event.getChunk();
-		if (chunk == null) {
-			return;
-		}
-		String chunkId = getChunkId(chunk);
-		if (scheduledChunks.contains(chunkId)) {
-			return;
-		}
-		scheduledChunks.add(chunkId);
-		CompletableFuture.runAsync(() -> {
-			try {
-				while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING && !playerLoadedChunks.contains(chunkId)) {
-					chunk.getWorld().unloadChunk(chunk.getX(), chunk.getZ(), true);
-				}
-			} catch (Exception e) {
-				e.printStackTrace();
-			} finally {
-				scheduledChunks.remove(chunkId);
-			}
 		}, AsyncExecutor);
 	}
 
@@ -238,11 +233,30 @@ public class PreGenerator implements Listener {
 		if (chunkWorld == null) {
 			return;
 		}
-
 		if (!event.isNewChunk() && !playerLoadedChunks.contains(chunkId)) {
 			chunkWorld.unloadChunk(chunk.getX(), chunk.getZ(), true);
 		} else {
 			playerLoadedChunks.add(chunkId);
+		}
+		scheduleChunkCheck(chunk, chunkId);
+	}
+
+	private void scheduleChunkCheck(Chunk chunk, String chunkId) {
+		if (scheduledChunks.add(chunkId)) {
+			CompletableFuture.runAsync(() -> {
+				try {
+					while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING && !playerLoadedChunks.contains(chunkId)) {
+						boolean unloaded = chunk.getWorld().unloadChunk(chunk.getX(), chunk.getZ(), true);
+						if (!unloaded) {
+							break;
+						}
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				} finally {
+					scheduledChunks.remove(chunkId);
+				}
+			});
 		}
 	}
 
@@ -276,6 +290,7 @@ public class PreGenerator implements Listener {
 			lastPrint = false;
 		}
 		chunksPerSec = 0;
+		localChunksThisCycle = 0;
 		chunksThisCycle = 0;
 	}
 
