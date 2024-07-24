@@ -113,7 +113,7 @@ chunk-system:
 
 ## Command Settings
 ## `ParallelTasksMultiplier`
-- **Recommendation:** Stay below your thread count.
+- **Recommendation:** Stay below your thread count (can be exceeded if you have lots of memory, but after a certain amount, you start to see diminishing returns; for me, it was at 240).
 - **Function:** Limits the number of parallel chunk load tasks.
 - **Calculation:** Multiplied by the number of threads available at server initialization. For example, if your server starts with 12 threads, the maximum number of parallel tasks allowed when **ParallelTasksMultiplier** is set to 6 will be 72.
 
