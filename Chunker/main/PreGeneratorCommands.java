@@ -1,7 +1,6 @@
 package main;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.command.Command;
@@ -15,14 +14,14 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
-	private final PreGenerator preGenerator;
-	private long worldBorder;
-	private static final String WARNING_MESSAGE = ChatColor.RED + "Invalid numbers provided.";
-	private static final String USAGE_MESSAGE = ChatColor.GREEN + "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>";
-	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000;
-	private int timeValue;
-	private long radiusValue;
-	private char timeUnit, radiusUnit;
+	private final PreGenerator preGenerator; 
+	private long worldBorder; 
+	private static final String WARNING_MESSAGE = cC.RED + "Invalid numbers provided."; 
+	private static final String USAGE_MESSAGE = cC.GREEN + "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>"; 
+	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000; 
+	private int timeValue; 
+	private long radiusValue; 
+	private char timeUnit, radiusUnit; 
 
 	public PreGeneratorCommands(PreGenerator preGenerator) {
 		this.preGenerator = preGenerator;
@@ -44,7 +43,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					World world = Bukkit.getWorld(worldName);
 					worldBorder = calculateChunksInBorder(world);
 					if (world == null) {
-						sender.sendMessage(ChatColor.RED + "World not found: " + worldName);
+						sender.sendMessage(cC.RED + "World not found: " + worldName);
 						return true;
 					}
 					long radius = parseRadius(args[3]);
@@ -81,33 +80,25 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			case 'h':
 				return timeValue * tickHour;
 			default:
-				return -1; // Invalid time unit
+				return -1; 
 			}
 		} catch (NumberFormatException | StringIndexOutOfBoundsException e) {
-			return -1; // Invalid format
+			return -1; 
 		}
 	}
 
 	public long calculateChunksInBorder(World world) {
-	    WorldBorder worldBorder = world.getWorldBorder();
-
-	    // Get the full diameter of the world border in blocks
-	    double diameter = worldBorder.getSize();
-
-	    // Calculate the radius in blocks
-	    double radiusInBlocks = diameter / 2.0;
-
-	    // Calculate the radius in chunks
-	    double radiusInChunks = Math.ceil(radiusInBlocks / 16.0);
-
-	    // Calculate the total number of chunks within the circular world border
-	    long totalChunks = (long) Math.pow(radiusInChunks * 2 + 1, 2);
-
-	    return totalChunks; //This position is one chunk (16 blocks) further of the edge to prevent players from falling through the world.
+		WorldBorder worldBorder = world.getWorldBorder(); 
+		double diameter = worldBorder.getSize();
+		double radiusInBlocks = diameter / 2.0;
+		double radiusInChunks = Math.ceil(radiusInBlocks / 16.0);
+		long totalChunks = (long) Math.pow(radiusInChunks * 2 + 1, 2);
+		return totalChunks; 
 	}
 
 	private long parseRadius(String radiusArg) {
 		if (radiusArg.equalsIgnoreCase("default")) {
+
 			return worldBorder;
 		}
 		try {
@@ -115,22 +106,23 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			radiusUnit = Character.toLowerCase(radiusArg.charAt(radiusArg.length() - 1));
 			switch (radiusUnit) {
 			case 'b':
-				return ((radiusValue / 16) * (radiusValue / 16));
+				return ((radiusValue / 16) * (radiusValue / 16)); 
 			case 'c':
-				return (radiusValue * radiusValue);
+				return (radiusValue * radiusValue); 
 			case 'r':
-				return ((radiusValue * 32) * (radiusValue * 32));
+				return ((radiusValue * 32) * (radiusValue * 32)); 
 			default:
-				return -1; // Invalid radius unit
+				return -1; 
 			}
 		} catch (NumberFormatException | StringIndexOutOfBoundsException e) {
-			return -1; // Invalid format
+			return -1; 
 		}
 	}
 
 	@Override
 	public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
 		if (command.getName().equalsIgnoreCase("pregen")) {
+
 			if (args.length == 1) {
 				return Arrays.asList("<ParallelTasksMultiplier>");
 			} else if (args.length == 2) {
@@ -146,8 +138,8 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 
 	public static void registerCommands(JavaPlugin plugin, PreGenerator preGenerator) {
 		PreGeneratorCommands commands = new PreGeneratorCommands(preGenerator);
-		plugin.getCommand("pregen").setExecutor(commands);
-		plugin.getCommand("pregen").setTabCompleter(commands);
-		plugin.getCommand("pregenoff").setExecutor(commands);
+		plugin.getCommand("pregen").setExecutor(commands); 
+		plugin.getCommand("pregen").setTabCompleter(commands); 
+		plugin.getCommand("pregenoff").setExecutor(commands); 
 	}
 }
