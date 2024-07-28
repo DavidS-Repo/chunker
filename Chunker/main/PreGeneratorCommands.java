@@ -16,12 +16,13 @@ import java.util.stream.Collectors;
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private final PreGenerator preGenerator; 
 	private long worldBorder; 
-	private static final String WARNING_MESSAGE = cC.RED + "Invalid numbers provided."; 
-	private static final String USAGE_MESSAGE = cC.GREEN + "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>"; 
-	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000; 
 	private int timeValue; 
 	private long radiusValue; 
-	private char timeUnit, radiusUnit; 
+	private char timeUnit, radiusUnit;
+	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000; 
+	private static final String 
+	WARNING_MESSAGE = "Invalid numbers provided.", 
+	USAGE_MESSAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>"; 
 
 	public PreGeneratorCommands(PreGenerator preGenerator) {
 		this.preGenerator = preGenerator;
@@ -36,29 +37,29 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					String printTimeArg = args[1];
 					int printTime = parseTime(printTimeArg);
 					if (printTime < 0) {
-						sender.sendMessage(WARNING_MESSAGE);
+						cC.sendS(sender, cC.RED, WARNING_MESSAGE);
 						return true;
 					}
 					String worldName = args[2];
 					World world = Bukkit.getWorld(worldName);
 					worldBorder = calculateChunksInBorder(world);
 					if (world == null) {
-						sender.sendMessage(cC.RED + "World not found: " + worldName);
+						sender.sendMessage(cC.RED + "World not found: " + worldName + cC.RESET);
 						return true;
 					}
 					long radius = parseRadius(args[3]);
 					if (radius < 0) {
-						sender.sendMessage(WARNING_MESSAGE);
+						cC.sendS(sender, cC.RED, WARNING_MESSAGE);
 						return true;
 					}
 					preGenerator.enable(parallelTasksMultiplier, timeUnit, timeValue, printTime, world, radius);
 					return true;
 				} catch (NumberFormatException e) {
-					sender.sendMessage(WARNING_MESSAGE);
+					cC.sendS(sender, cC.RED, WARNING_MESSAGE);
 					return true;
 				}
 			} else {
-				sender.sendMessage(USAGE_MESSAGE);
+				cC.sendS(sender, cC.GREEN, USAGE_MESSAGE);
 				return true;
 			}
 		} else if (label.equalsIgnoreCase("pregenoff")) {
@@ -98,7 +99,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 
 	private long parseRadius(String radiusArg) {
 		if (radiusArg.equalsIgnoreCase("default")) {
-
 			return worldBorder;
 		}
 		try {
@@ -122,7 +122,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	@Override
 	public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
 		if (command.getName().equalsIgnoreCase("pregen")) {
-
 			if (args.length == 1) {
 				return Arrays.asList("<ParallelTasksMultiplier>");
 			} else if (args.length == 2) {
