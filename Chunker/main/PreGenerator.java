@@ -8,6 +8,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -16,36 +17,33 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.LongAdder;
 
 public class PreGenerator implements Listener {
 
 	private boolean enabled = false, complete = false, lastPrint = false;
 	private final JavaPlugin plugin;
-
 	private String currentWorldName;
 	private World world;
 	private boolean firstPrint;
 
 	private ScheduledExecutorService scheduler;
 	private ScheduledExecutorService taskScheduler;
-	private final static int tickMillisecond = 50;
+	private static final int TICK_MILLISECOND = 50;
+	private static final int THREADS = Runtime.getRuntime().availableProcessors();
 
-	private int parallelTasksMultiplier, timeValue, printTime, chunksPerSec;
+	private int parallelTasksMultiplier, timeValue, printTime, chunksPerSec, tasks;
 	private char timeUnit;
 	private long radius;
-
 	private int x, z, dx, dz, currentX, currentZ;
-	private LongAdder totalChunksProcessed = new LongAdder();
+	private long totalChunksProcessed = 0;
 	private int chunksThisCycle = 0, localChunksThisCycle = 0;
 
-	private static final String 
-	ENABLED_WARNING_MESSAGE = "Pre-Generator is already enabled.",
-	ENABLED_MESSAGE = "Pre-generation has been enabled.",
-	COMPLETE = "Pre-generation Complete.",
-	DISABLED_WARNING_MESSAGE = "Pre-Generator is already disabled.",
-	DISABLED_MESSAGE = "Pre-generation disabled.",
-	RADIUS_EXCEEDED_MESSAGE = "To process more chunks please increase the radius.";
+	private static final String ENABLED_WARNING_MESSAGE = "Pre-Generator is already enabled.";
+	private static final String ENABLED_MESSAGE = "Pre-generation has been enabled.";
+	private static final String COMPLETE = "Pre-generation Complete.";
+	private static final String DISABLED_WARNING_MESSAGE = "Pre-Generator is already disabled.";
+	private static final String DISABLED_MESSAGE = "Pre-generation disabled.";
+	private static final String RADIUS_EXCEEDED_MESSAGE = "To process more chunks please increase the radius.";
 
 	private final Set<String> scheduledChunks = ConcurrentHashMap.newKeySet();
 	private final Set<String> playerLoadedChunks = ConcurrentHashMap.newKeySet();
@@ -53,13 +51,8 @@ public class PreGenerator implements Listener {
 	private long TimerStart = 0;
 	private long TimerEnd = 0;
 
-	private static final boolean IS_PAPER;
-    private static int serverMillisecond;
-    
-    static {
-        IS_PAPER = detectPaper();
-        setTaskDelay();
-    }
+	private static final boolean IS_PAPER = detectPaper();
+	private static final int serverMillisecond = (int) (THREADS * 4.834);
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -71,7 +64,7 @@ public class PreGenerator implements Listener {
 			return;
 		}
 		if (this.world != null && !this.world.equals(world)) {
-			totalChunksProcessed.reset();
+			totalChunksProcessed = 0;
 		}
 		this.world = world;
 		this.parallelTasksMultiplier = parallelTasksMultiplier;
@@ -84,14 +77,13 @@ public class PreGenerator implements Listener {
 		complete = false;
 		currentWorldName = world.getName();
 		loadProcessedChunks();
-		if (totalChunksProcessed.sum() >= radius) {
+		if (totalChunksProcessed >= radius) {
 			cC.logS(cC.YELLOW, RADIUS_EXCEEDED_MESSAGE);
 			enabled = false;
 			return;
 		}
 		cC.logS(cC.GREEN, ENABLED_MESSAGE);
-		scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
-		taskScheduler = Executors.newScheduledThreadPool(parallelTasksMultiplier, Thread.ofVirtual().factory());
+		initializeSchedulers();
 		startGeneration();
 		startPrintInfoTimer();
 	}
@@ -105,12 +97,21 @@ public class PreGenerator implements Listener {
 		cC.logS(cC.RED, DISABLED_MESSAGE);
 	}
 
+	private void initializeSchedulers() {
+		scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
+		taskScheduler = Executors.newScheduledThreadPool(parallelTasksMultiplier, Thread.ofVirtual().factory());
+	}
+
 	private synchronized void terminate() {
 		TimerEnd = System.currentTimeMillis();
 		enabled = false;
 		saveProcessedChunks();
 		printInfo();
 		stopPrintInfoTimer();
+		shutdownSchedulers();
+	}
+
+	private void shutdownSchedulers() {
 		if (scheduler != null && !scheduler.isShutdown()) {
 			scheduler.shutdownNow();
 		}
@@ -122,9 +123,9 @@ public class PreGenerator implements Listener {
 	private void startPrintInfoTimer() {
 		if (firstPrint) {
 			firstPrint = false;
-			cC.logSB("Available Processors: " + Runtime.getRuntime().availableProcessors());
+			cC.logSB("Available Processors: " + THREADS);
 		}
-		scheduler.scheduleAtFixedRate(this::printInfo, 0, printTime * tickMillisecond, TimeUnit.MILLISECONDS);
+		scheduler.scheduleAtFixedRate(this::printInfo, 0, printTime * TICK_MILLISECOND, TimeUnit.MILLISECONDS);
 	}
 
 	private void stopPrintInfoTimer() {
@@ -138,68 +139,113 @@ public class PreGenerator implements Listener {
 	private String formatElapsedTime(long seconds) {
 		long hours = seconds / 3600, minutes = (seconds % 3600) / 60, remainingSeconds = seconds % 60;
 		StringBuilder formattedTime = new StringBuilder();
-		if (hours > 0) {formattedTime.append(hours).append(" Hour").append(hours > 1 ? "s" : "").append(" ");}
-		if (minutes > 0) {formattedTime.append(minutes).append(" Minute").append(minutes > 1 ? "s" : "").append(" ");}
-		if (remainingSeconds > 0 || formattedTime.length() == 0) {formattedTime.append(remainingSeconds).append(" Second").append(remainingSeconds != 1 ? "s" : "").append(" ");}
+		if (hours > 0) {
+			formattedTime.append(hours).append(" Hour").append(hours > 1 ? "s" : "").append(" ");
+		}
+		if (minutes > 0) {
+			formattedTime.append(minutes).append(" Minute").append(minutes > 1 ? "s" : "").append(" ");
+		}
+		if (remainingSeconds > 0 || formattedTime.length() == 0) {
+			formattedTime.append(remainingSeconds).append(" Second").append(remainingSeconds != 1 ? "s" : "").append(" ");
+		}
 		return formattedTime.toString().trim();
 	}
 
 	private void startGeneration() {
 		TimerStart = System.currentTimeMillis();
-		for (int i = 0; i < parallelTasksMultiplier; i++) {
-			generateChunkBatch();
+		if (IS_PAPER) {
+			for (int i = 0; i < parallelTasksMultiplier; i++) {
+				asyncProcess();
+			}
+		} else {
+			new BukkitRunnable() {
+				@Override
+				public void run() {
+					tasks = Math.max(1, (int)(parallelTasksMultiplier / 2));
+					for (int i = 0; i < tasks; i++) {
+						syncProcess();
+					}
+				}
+			}.runTaskTimer(plugin, 0L, 0L);
 		}
 	}
 
-	private void generateChunkBatch() {
+	private void asyncProcess() {
 		if (!enabled) {
 			return;
 		}
-
 		taskScheduler.scheduleAtFixedRate(() -> {
-			if (!enabled || totalChunksProcessed.sum() >= radius) {
+			if (!enabled || totalChunksProcessed >= radius) {
 				return;
 			}
 			synchronized (this) {
 				currentX = x;
 				currentZ = z;
-				if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
-					int temp = dx;
-					dx = -dz;
-					dz = temp;
-				}
-				x += dx;
-				z += dz;
+				updateCoordinates();
 			}
-			getChunkAtAsync(world, currentX, currentZ, true);
+			getChunkAsync(currentX, currentZ, true);
+
 		}, 0, serverMillisecond, TimeUnit.MILLISECONDS);
 	}
 
-	private void getChunkAtAsync(World world, int x, int z, boolean gen) {
+	private void syncProcess() {
+		if (!enabled) {
+			return;
+		}
+		if (totalChunksProcessed >= radius) {
+			return;
+		}
+		synchronized (this) {
+			currentX = x;
+			currentZ = z;
+			updateCoordinates();
+		}
+		World currentWorld = world;
+		Chunk chunk = currentWorld.getChunkAt(currentX, currentZ);
+		currentWorld.loadChunk(currentX, currentZ, true);
+		syncUnload(chunk, currentWorld);
+		totalChunksProcessed++;
+		completionCheck();
+		saveProcessedChunks();
+	}
+
+	private void getChunkAsync(int x, int z, boolean gen) {
 		taskScheduler.execute(() -> {
-			if (IS_PAPER) {
-				world.getChunkAtAsync(x, z, gen);
-			} else {
-				getChunkSynchronously(world, x, z, gen);
-			}
+			world.getChunkAtAsync(x, z, gen);
 			saveProcessedChunks();
 			synchronized (this) {
-				totalChunksProcessed.increment();
-				if (totalChunksProcessed.sum() >= radius) {
-					if (!complete) {
-						complete = true;
-						lastPrint = true;
-						terminate();
-					}
-				}
+				totalChunksProcessed++;
+				completionCheck();
 			}
 		});
 	}
 
-	private void getChunkSynchronously(World world, int x, int z, boolean gen) {
-		Chunk chunk = world.getChunkAt(x, z, gen);
-		while (!chunk.isLoaded()) {
-			world.unloadChunk(x, z, gen);
+	private void updateCoordinates() {
+		if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
+			int temp = dx;
+			dx = -dz;
+			dz = temp;
+		}
+		x += dx;
+		z += dz;
+	}
+
+	private void syncUnload(Chunk chunk, World currentWorld) {
+		while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING) {
+			boolean unloaded = currentWorld.unloadChunk(currentX, currentZ, true);
+			if (!unloaded) {
+				break;
+			}
+		}
+	}
+
+	private void completionCheck() {
+		if (totalChunksProcessed >= radius) {
+			if (!complete) {
+				complete = true;
+				lastPrint = true;
+				terminate();
+			}
 		}
 	}
 
@@ -208,34 +254,40 @@ public class PreGenerator implements Listener {
 		if (!enabled) {
 			return;
 		}
+		handleChunkLoad(event);
+	}
+
+	private void handleChunkLoad(ChunkLoadEvent event) {
 		Chunk chunk = event.getChunk();
-		if (chunk == null) {
-			return;
-		}
-		String chunkId = getChunkId(chunk);
 		World chunkWorld = chunk.getWorld();
-		if (chunkWorld == null) {
+		String chunkId = getChunkId(chunk);
+		if (chunk == null || playerLoadedChunks.contains(chunkId)) {
 			return;
 		}
+		chunkId = getChunkId(chunk);
 		if (!event.isNewChunk() && !playerLoadedChunks.contains(chunkId)) {
-			chunkWorld.unloadChunk(chunk.getX(), chunk.getZ(), true);
+			chunkWorld.unloadChunk(x, z, true);
 		} else {
 			playerLoadedChunks.add(chunkId);
 		}
-		scheduleChunkCheck(chunk, chunkId);
+		if (IS_PAPER) {
+			chunksThisCycle++;
+			asyncUnload(chunk, chunkId);
+		} else {
+			chunksThisCycle++;
+		}
 	}
 
 	private String getChunkId(Chunk chunk) {
 		return chunk.getWorld().getName() + "_" + chunk.getX() + "_" + chunk.getZ();
 	}
 
-	private void scheduleChunkCheck(Chunk chunk, String chunkId) {
-		chunksThisCycle++;
+	private void asyncUnload(Chunk chunk, String chunkId) {
 		if (scheduledChunks.add(chunkId)) {
 			taskScheduler.execute(() -> {
 				try {
 					while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING && !playerLoadedChunks.contains(chunkId)) {
-						boolean unloaded = chunk.getWorld().unloadChunk(chunk.getX(), chunk.getZ(), true);
+						boolean unloaded = chunk.unload(true);
 						if (!unloaded) {
 							break;
 						}
@@ -261,15 +313,27 @@ public class PreGenerator implements Listener {
 	private void printInfo() {
 		localChunksThisCycle = chunksThisCycle;
 		chunksPerSec = localChunksThisCycle / timeValue;
-		String PROCESSED = cC.logO(cC.GOLD, localChunksThisCycle), PERSEC = cC.logO(cC.GOLD, chunksPerSec), 
-		WORLD = cC.logO(cC.GOLD, currentWorldName), COMPLETION = cC.logO(cC.GOLD, totalChunksProcessed.sum()), RADIUS = cC.logO(cC.GOLD, radius);
+		logProgress();
+		resetCycleCounts();
+	}
+
+	private void logProgress() {
+		String processedChunks = cC.logO(cC.GOLD, localChunksThisCycle);
+		String chunksPerSecStr = cC.logO(cC.GOLD, chunksPerSec);
+		String worldStr = cC.logO(cC.GOLD, currentWorldName);
+		String completionStr = cC.logO(cC.GOLD, totalChunksProcessed);
+		String radiusStr = cC.logO(cC.GOLD, radius);
+
 		if (enabled && !complete) {
-			cC.logSB(String.format("[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks", WORLD, PROCESSED, timeUnit, PERSEC, COMPLETION, RADIUS));
+			cC.logSB(String.format("[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks", worldStr, processedChunks, timeUnit, chunksPerSecStr, completionStr, radiusStr));
 		} else if (!enabled && complete && lastPrint) {
-			cC.logSB(String.format("[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks", WORLD, PROCESSED, timeUnit, PERSEC, RADIUS, RADIUS));
+			cC.logSB(String.format("[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks", worldStr, processedChunks, timeUnit, chunksPerSecStr, radiusStr, radiusStr));
 			cC.logS(cC.GREEN, COMPLETE);
 			lastPrint = false;
 		}
+	}
+
+	private void resetCycleCounts() {
 		chunksPerSec = 0;
 		localChunksThisCycle = 0;
 		chunksThisCycle = 0;
@@ -283,7 +347,7 @@ public class PreGenerator implements Listener {
 		File dataFile = new File(dataFolder, currentWorldName + "_pregenerator.txt");
 		String data;
 		synchronized (this) {
-			data = String.format("%d_%d_%d_%d%n%d", x, z, dx, dz, totalChunksProcessed.sum());
+			data = String.format("%d_%d_%d_%d%n%d", x, z, dx, dz, totalChunksProcessed);
 		}
 		try {
 			Files.writeString(dataFile.toPath(), data);
@@ -308,10 +372,9 @@ public class PreGenerator implements Listener {
 					}
 				}
 				if (lines.size() > 1) {
-					long processedChunks = Long.parseLong(lines.get(1));
-					totalChunksProcessed.add(processedChunks - totalChunksProcessed.sum());
+					totalChunksProcessed = Long.parseLong(lines.get(1));
 				}
-				cC.logSB("Loaded " + totalChunksProcessed.sum() + " processed chunks from: " + cC.GOLD +  currentWorldName + cC.RESET);
+				cC.logSB("Loaded " + totalChunksProcessed + " processed chunks from: " + cC.GOLD + currentWorldName + cC.RESET);
 			} catch (IOException | NumberFormatException e) {
 				e.printStackTrace();
 				cC.logS(cC.RED, "Failed to load processed chunks for " + currentWorldName);
@@ -322,19 +385,11 @@ public class PreGenerator implements Listener {
 	}
 
 	private static boolean detectPaper() {
-        try {
-            Class.forName("com.destroystokyo.paper.PaperConfig");
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
-    }
-
-    private static void setTaskDelay() {
-        if (IS_PAPER) {
-            serverMillisecond = 57;
-        } else {
-            serverMillisecond = 1;
-        }
-    }
+		try {
+			Class.forName("com.destroystokyo.paper.PaperConfig");
+			return true;
+		} catch (ClassNotFoundException e) {
+			return false;
+		}
+	}
 }
