@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 public class PreGenerator implements Listener {
 
-	private boolean enabled = false, complete = false, lastPrint = false;
+	private boolean enabled = false, complete = false;
 	private final JavaPlugin plugin;
 	private String currentWorldName;
 	private World world;
@@ -38,12 +38,13 @@ public class PreGenerator implements Listener {
 	private long totalChunksProcessed = 0;
 	private int chunksThisCycle = 0, localChunksThisCycle = 0;
 
-	private static final String ENABLED_WARNING_MESSAGE = "Pre-Generator is already enabled.";
-	private static final String ENABLED_MESSAGE = "Pre-generation has been enabled.";
-	private static final String COMPLETE = "Pre-generation Complete.";
-	private static final String DISABLED_WARNING_MESSAGE = "Pre-Generator is already disabled.";
-	private static final String DISABLED_MESSAGE = "Pre-generation disabled.";
-	private static final String RADIUS_EXCEEDED_MESSAGE = "To process more chunks please increase the radius.";
+	private static final String 
+	ENABLED_WARNING_MESSAGE = "Pre-Generator is already enabled.",
+	ENABLED_MESSAGE = "Pre-generation has been enabled.",
+	COMPLETE = "Pre-generation Complete.",
+	DISABLED_WARNING_MESSAGE = "Pre-Generator is already disabled.",
+	DISABLED_MESSAGE = "Pre-generation disabled.",
+	RADIUS_EXCEEDED_MESSAGE = "To process more chunks please increase the radius.";
 
 	private final Set<String> scheduledChunks = ConcurrentHashMap.newKeySet();
 	private final Set<String> playerLoadedChunks = ConcurrentHashMap.newKeySet();
@@ -52,7 +53,7 @@ public class PreGenerator implements Listener {
 	private long TimerEnd = 0;
 
 	private static final boolean IS_PAPER = detectPaper();
-	private static final int serverMillisecond = (int) (THREADS * 4.834);
+	private static final int SERVERMILLISECOND = 60;
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -99,19 +100,22 @@ public class PreGenerator implements Listener {
 
 	private void initializeSchedulers() {
 		scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
-		taskScheduler = Executors.newScheduledThreadPool(parallelTasksMultiplier, Thread.ofVirtual().factory());
+		taskScheduler = Executors.newScheduledThreadPool(THREADS, Thread.ofVirtual().factory());
 	}
 
 	private synchronized void terminate() {
 		TimerEnd = System.currentTimeMillis();
-		enabled = false;
 		saveProcessedChunks();
 		printInfo();
 		stopPrintInfoTimer();
 		shutdownSchedulers();
+		enabled = false;
 	}
 
 	private void shutdownSchedulers() {
+		if (!enabled) {
+			return;
+		}
 		if (scheduler != null && !scheduler.isShutdown()) {
 			scheduler.shutdownNow();
 		}
@@ -129,6 +133,9 @@ public class PreGenerator implements Listener {
 	}
 
 	private void stopPrintInfoTimer() {
+		if (!enabled) {
+			return;
+		}
 		scheduler.shutdownNow();
 		long elapsedTime = (TimerEnd - TimerStart) / 1000;
 		cC.logSB("Total time: " + cC.GOLD + formatElapsedTime(elapsedTime) + cC.RESET);
@@ -161,7 +168,7 @@ public class PreGenerator implements Listener {
 			new BukkitRunnable() {
 				@Override
 				public void run() {
-					tasks = Math.max(1, (int)(parallelTasksMultiplier / 2));
+					tasks = Math.max(1, (int)(parallelTasksMultiplier / 2.5));
 					for (int i = 0; i < tasks; i++) {
 						syncProcess();
 					}
@@ -175,17 +182,16 @@ public class PreGenerator implements Listener {
 			return;
 		}
 		taskScheduler.scheduleAtFixedRate(() -> {
-			if (!enabled || totalChunksProcessed >= radius) {
+			if (totalChunksProcessed >= radius) {
 				return;
 			}
 			synchronized (this) {
-				currentX = x;
-				currentZ = z;
+				currentX = x; currentZ = z;
 				updateCoordinates();
 			}
 			getChunkAsync(currentX, currentZ, true);
-
-		}, 0, serverMillisecond, TimeUnit.MILLISECONDS);
+			completionCheck();
+		}, 0, SERVERMILLISECOND, TimeUnit.MILLISECONDS);
 	}
 
 	private void syncProcess() {
@@ -195,16 +201,9 @@ public class PreGenerator implements Listener {
 		if (totalChunksProcessed >= radius) {
 			return;
 		}
-		synchronized (this) {
-			currentX = x;
-			currentZ = z;
-			updateCoordinates();
-		}
-		World currentWorld = world;
-		Chunk chunk = currentWorld.getChunkAt(currentX, currentZ);
-		currentWorld.loadChunk(currentX, currentZ, true);
-		syncUnload(chunk, currentWorld);
-		totalChunksProcessed++;
+		currentX = x; currentZ = z;
+		updateCoordinates();
+		handleChunk(currentX, currentZ);
 		completionCheck();
 		saveProcessedChunks();
 	}
@@ -215,6 +214,7 @@ public class PreGenerator implements Listener {
 			saveProcessedChunks();
 			synchronized (this) {
 				totalChunksProcessed++;
+				chunksThisCycle++;
 				completionCheck();
 			}
 		});
@@ -230,22 +230,23 @@ public class PreGenerator implements Listener {
 		z += dz;
 	}
 
-	private void syncUnload(Chunk chunk, World currentWorld) {
-		while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING) {
-			boolean unloaded = currentWorld.unloadChunk(currentX, currentZ, true);
+	private void handleChunk(int x, int z) {
+		Chunk chunk = world.getChunkAt(x, z);
+		chunk.load(true);
+		while (chunk.getLoadLevel() == Chunk.LoadLevel.ENTITY_TICKING) {
+			boolean unloaded = world.unloadChunk(x, z, true);
 			if (!unloaded) {
 				break;
 			}
 		}
+		totalChunksProcessed++;
+		chunksThisCycle++;
 	}
 
 	private void completionCheck() {
 		if (totalChunksProcessed >= radius) {
-			if (!complete) {
-				complete = true;
-				lastPrint = true;
-				terminate();
-			}
+			complete = true;
+			terminate();
 		}
 	}
 
@@ -271,10 +272,7 @@ public class PreGenerator implements Listener {
 			playerLoadedChunks.add(chunkId);
 		}
 		if (IS_PAPER) {
-			chunksThisCycle++;
-			asyncUnload(chunk, chunkId);
-		} else {
-			chunksThisCycle++;
+		asyncUnloadCheck(chunk, chunkId);
 		}
 	}
 
@@ -282,7 +280,7 @@ public class PreGenerator implements Listener {
 		return chunk.getWorld().getName() + "_" + chunk.getX() + "_" + chunk.getZ();
 	}
 
-	private void asyncUnload(Chunk chunk, String chunkId) {
+	private void asyncUnloadCheck(Chunk chunk, String chunkId) {
 		if (scheduledChunks.add(chunkId)) {
 			taskScheduler.execute(() -> {
 				try {
@@ -318,18 +316,19 @@ public class PreGenerator implements Listener {
 	}
 
 	private void logProgress() {
-		String processedChunks = cC.logO(cC.GOLD, localChunksThisCycle);
-		String chunksPerSecStr = cC.logO(cC.GOLD, chunksPerSec);
+		int radiusWidth = String.valueOf(radius).length();
 		String worldStr = cC.logO(cC.GOLD, currentWorldName);
-		String completionStr = cC.logO(cC.GOLD, totalChunksProcessed);
-		String radiusStr = cC.logO(cC.GOLD, radius);
+		String processed = cC.fA(cC.GOLD, localChunksThisCycle, 4);
+		String perSecond = cC.fA(cC.GOLD, chunksPerSec, 4);
+		String completion = cC.fA(cC.GOLD, totalChunksProcessed, radiusWidth);
+		String radiusStr = cC.fA(cC.GOLD, radius, radiusWidth);
+		String logFormat = "[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks";
 
 		if (enabled && !complete) {
-			cC.logSB(String.format("[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks", worldStr, processedChunks, timeUnit, chunksPerSecStr, completionStr, radiusStr));
-		} else if (!enabled && complete && lastPrint) {
-			cC.logSB(String.format("[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks", worldStr, processedChunks, timeUnit, chunksPerSecStr, radiusStr, radiusStr));
+			cC.logSB(String.format(logFormat, worldStr, processed, timeUnit, perSecond, completion, radiusStr));
+		} else if (complete && localChunksThisCycle != 0 && chunksPerSec != 0) {
+			cC.logSB(String.format(logFormat, worldStr, processed, timeUnit, perSecond, radiusStr, radiusStr));
 			cC.logS(cC.GREEN, COMPLETE);
-			lastPrint = false;
 		}
 	}
 
@@ -340,6 +339,9 @@ public class PreGenerator implements Listener {
 	}
 
 	private void saveProcessedChunks() {
+		if (!enabled) {
+			return;
+		}
 		File dataFolder = plugin.getDataFolder();
 		if (!dataFolder.exists()) {
 			dataFolder.mkdirs();
