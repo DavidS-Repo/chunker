@@ -24,7 +24,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	WARNING_MESSAGE = "Invalid numbers provided.", 
 	USAGE_MESSAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>"; 
 
-	public PreGeneratorCommands(PreGenerator preGenerator) {
+	public PreGeneratorCommands(PreGenerator preGenerator, PluginSettings settings) {
 		this.preGenerator = preGenerator;
 	}
 
@@ -32,41 +32,63 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
 		if (label.equalsIgnoreCase("pregen")) {
 			if (args.length == 4) {
-				try {
-					int parallelTasksMultiplier = Integer.parseInt(args[0]);
-					String printTimeArg = args[1];
-					int printTime = parseTime(printTimeArg);
-					if (printTime < 0) {
-						cC.sendS(sender, cC.RED, WARNING_MESSAGE);
-						return true;
-					}
-					String worldName = args[2];
-					World world = Bukkit.getWorld(worldName);
-					worldBorder = calculateChunksInBorder(world);
-					if (world == null) {
-						sender.sendMessage(cC.RED + "World not found: " + worldName + cC.RESET);
-						return true;
-					}
-					long radius = parseRadius(args[3]);
-					if (radius < 0) {
-						cC.sendS(sender, cC.RED, WARNING_MESSAGE);
-						return true;
-					}
-					preGenerator.enable(parallelTasksMultiplier, timeUnit, timeValue, printTime, world, radius);
-					return true;
-				} catch (NumberFormatException e) {
-					cC.sendS(sender, cC.RED, WARNING_MESSAGE);
-					return true;
-				}
+				handlePreGenCommand(sender, args);
+				return true;
 			} else {
-				cC.sendS(sender, cC.GREEN, USAGE_MESSAGE);
+				sender.sendMessage(USAGE_MESSAGE);
 				return true;
 			}
 		} else if (label.equalsIgnoreCase("pregenoff")) {
-			preGenerator.disable();
+			handlePreGenOffCommand(sender, args);
 			return true;
 		}
 		return false;
+	}
+
+	private void handlePreGenCommand(CommandSender sender, String[] args) {
+		try {
+			int parallelTasksMultiplier = Integer.parseInt(args[0]);
+			String printTimeArg = args[1];
+			int printTime = parseTime(printTimeArg);
+			if (printTime < 0) {
+				sender.sendMessage(WARNING_MESSAGE);
+				return;
+			}
+			String worldName = args[2];
+			World world = Bukkit.getWorld(worldName);
+			worldBorder = calculateChunksInBorder(world);
+			if (world == null) {
+				sender.sendMessage("World not found: " + worldName);
+				return;
+			}
+			long radius = parseRadius(args[3]);
+			if (radius < 0) {
+				sender.sendMessage(WARNING_MESSAGE);
+				return;
+			}
+			preGenerator.enable(parallelTasksMultiplier, timeUnit, timeValue, printTime, world, radius);
+		} catch (NumberFormatException e) {
+			sender.sendMessage(WARNING_MESSAGE);
+		}
+	}
+
+	public void handlePreGenOffCommand(CommandSender sender, String[] args) {
+		if (args.length == 0) {
+			// Turn off pre-generation for all worlds
+			for (World world : Bukkit.getWorlds()) {
+				preGenerator.disable(world);
+			}
+		} else if (args.length == 1) {
+			String worldName = args[0];
+			World world = Bukkit.getWorld(worldName);
+			if (world == null) {
+				sender.sendMessage("World not found: " + worldName);
+				return;
+			}
+			preGenerator.disable(world);
+		} else {
+			sender.sendMessage("Usage: /pregenoff [world]");
+		}
 	}
 
 	private int parseTime(String timeArg) {
@@ -81,42 +103,76 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			case 'h':
 				return timeValue * tickHour;
 			default:
-				return -1; 
+				return -1;
 			}
 		} catch (NumberFormatException | StringIndexOutOfBoundsException e) {
-			return -1; 
+			return -1;
 		}
-	}
-
-	public long calculateChunksInBorder(World world) {
-		WorldBorder worldBorder = world.getWorldBorder(); 
-		double diameter = worldBorder.getSize();
-		double radiusInBlocks = diameter / 2.0;
-		double radiusInChunks = Math.ceil(radiusInBlocks / 16.0);
-		long totalChunks = (long) Math.pow(radiusInChunks * 2 + 1, 2);
-		return totalChunks; 
 	}
 
 	private long parseRadius(String radiusArg) {
-		if (radiusArg.equalsIgnoreCase("default")) {
-			return worldBorder;
-		}
 		try {
+			if (radiusArg.equalsIgnoreCase("default")) {
+				return worldBorder;
+			}
 			radiusValue = Long.parseLong(radiusArg.substring(0, radiusArg.length() - 1));
 			radiusUnit = Character.toLowerCase(radiusArg.charAt(radiusArg.length() - 1));
 			switch (radiusUnit) {
 			case 'b':
-				return ((radiusValue / 16) * (radiusValue / 16)); 
+				return ((radiusValue / 16) * (radiusValue / 16));
 			case 'c':
-				return (radiusValue * radiusValue); 
+				return (radiusValue * radiusValue);
 			case 'r':
-				return ((radiusValue * 32) * (radiusValue * 32)); 
+				return ((radiusValue * 32) * (radiusValue * 32));
 			default:
-				return -1; 
+				return -1;
 			}
 		} catch (NumberFormatException | StringIndexOutOfBoundsException e) {
-			return -1; 
+			return -1;
 		}
+	}
+
+	public void checkAndRunAutoPreGenerators() {
+		int totalCores = PluginSettings.THREADS();
+		int autoRunCount = 0;
+
+		if (PluginSettings.world_autoRun()) autoRunCount++;
+		if (PluginSettings.world_nether_autoRun()) autoRunCount++;
+		if (PluginSettings.world_the_end_autoRun()) autoRunCount++;
+
+		if (autoRunCount == 0) return;
+
+		int coresPerTask = totalCores / autoRunCount;
+
+		if (PluginSettings.world_autoRun() && Bukkit.getWorld("world") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+			int world_printTime = parseTime(PluginSettings.world_PrintUpdateDelayin());
+			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world"));
+			long a = parseRadius(PluginSettings.world_radius());
+			preGenerator.enable(coresPerTask, timeUnit, timeValue, world_printTime, Bukkit.getWorld("world"), a);
+		}
+
+		if (PluginSettings.world_nether_autoRun() && Bukkit.getWorld("world_nether") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+			int world_nether_printTime = parseTime(PluginSettings.world_nether_PrintUpdateDelayin());
+			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_nether"));
+			long b = parseRadius(PluginSettings.world_nether_radius());
+			preGenerator.enable(coresPerTask, timeUnit, timeValue, world_nether_printTime, Bukkit.getWorld("world_nether"), b);
+		}
+
+		if (PluginSettings.world_the_end_autoRun() && Bukkit.getWorld("world_the_end") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+			int world_the_end_printTime = parseTime(PluginSettings.world_the_end_PrintUpdateDelayin());
+			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_the_end"));
+			long c = parseRadius(PluginSettings.world_the_end_radius());
+			preGenerator.enable(coresPerTask, timeUnit, timeValue, world_the_end_printTime, Bukkit.getWorld("world_the_end"), c);
+		}
+	}
+
+	public long calculateChunksInBorder(World world) {
+		WorldBorder worldBorder = world.getWorldBorder();
+		double diameter = worldBorder.getSize();
+		double radiusInBlocks = diameter / 2.0;
+		double radiusInChunks = Math.ceil(radiusInBlocks / 16.0);
+		long totalChunks = (long) Math.pow(radiusInChunks * 2 + 1, 2);
+		return totalChunks;
 	}
 
 	@Override
@@ -131,14 +187,19 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			} else if (args.length == 4) {
 				return Arrays.asList("<Radius(Blocks/Chunks/Regions)>", "default");
 			}
+		} else if (command.getName().equalsIgnoreCase("pregenoff")) {
+			if (args.length == 1) {
+				return Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.toList());
+			}
 		}
 		return null;
 	}
 
 	public static void registerCommands(JavaPlugin plugin, PreGenerator preGenerator) {
-		PreGeneratorCommands commands = new PreGeneratorCommands(preGenerator);
-		plugin.getCommand("pregen").setExecutor(commands); 
-		plugin.getCommand("pregen").setTabCompleter(commands); 
-		plugin.getCommand("pregenoff").setExecutor(commands); 
+		PreGeneratorCommands commands = new PreGeneratorCommands(preGenerator, new PluginSettings(plugin));
+		plugin.getCommand("pregen").setExecutor(commands);
+		plugin.getCommand("pregen").setTabCompleter(commands);
+		plugin.getCommand("pregenoff").setExecutor(commands);
+		plugin.getCommand("pregenoff").setTabCompleter(commands);
 	}
 }
