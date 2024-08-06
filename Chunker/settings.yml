@@ -1,0 +1,29 @@
+# Configuration
+
+# autoRun (true or false) for if you would like the pre-generation to run when it detects no players on the server
+# SERVERMILLISECOND determines how fast you want chunks to be queued up, I found that for my 5600x a good amount for the overworld is about 57-62, for the nether 1/2 that, and for the end 1/8 that.
+# It can be tweaked heavily depending on what performance you want and in what world when combined with parallelTasksMultiplier, larger number means lower chunks per seconds proccessed.
+# Parallel tasks multiplier determines how many async Process tasks will run concurrently (do not exceed thread count or you will get backlog after task completion), 
+# auto will try to split it up in between all your threads
+# PrintUpdateDelayin determines how often you will get the information printout for this world in (s-Seconds, m-Minutes, h-Hours), default is 5s so 5 seconds.
+# Set Radius of how far you want the pre-generator to run for the world(b-Blocks, c-Chunks, r-Regions) or (default) to pre-generate until world border
+
+# Settings
+world:
+  autoRun: false
+  SERVERMILLISECOND: 60
+  parallelTasksMultiplier: default
+  PrintUpdateDelayin: 5s
+  radius: default
+world_nether:
+  autoRun: false
+  SERVERMILLISECOND: 30
+  parallelTasksMultiplier: default
+  PrintUpdateDelayin: 5s
+  radius: default
+world_the_end:
+  autoRun: false
+  SERVERMILLISECOND: 10
+  parallelTasksMultiplier: default
+  PrintUpdateDelayin: 5s
+  radius: default
