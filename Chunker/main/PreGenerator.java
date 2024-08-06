@@ -2,6 +2,7 @@ package main;
 
 import org.bukkit.Chunk;
 import org.bukkit.World;
+import org.bukkit.World.Environment;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -12,135 +13,129 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.io.*;
 import java.nio.file.Files;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class PreGenerator implements Listener {
 
-	private boolean enabled = false, complete = false;
 	private final JavaPlugin plugin;
-	private String currentWorldName;
-	private World world;
-	private boolean firstPrint;
-
-	private ScheduledExecutorService scheduler;
-	private ScheduledExecutorService taskScheduler;
-	private static final int TICK_MILLISECOND = 50;
-	private static final int THREADS = Runtime.getRuntime().availableProcessors();
-
-	private int parallelTasksMultiplier, timeValue, printTime, chunksPerSec, tasks;
-	private char timeUnit;
-	private long radius;
-	private int x, z, dx, dz, currentX, currentZ;
-	private long totalChunksProcessed = 0;
-	private int chunksThisCycle = 0, localChunksThisCycle = 0;
+	private final Map<String, PreGenerationTask> tasks = new ConcurrentHashMap<>();
 
 	private static final String 
-	ENABLED_WARNING_MESSAGE = "Pre-Generator is already enabled.",
-	ENABLED_MESSAGE = "Pre-generation has been enabled.",
-	COMPLETE = "Pre-generation Complete.",
-	DISABLED_WARNING_MESSAGE = "Pre-Generator is already disabled.",
-	DISABLED_MESSAGE = "Pre-generation disabled.",
-	RADIUS_EXCEEDED_MESSAGE = "To process more chunks please increase the radius.";
-
-	private final Set<String> scheduledChunks = ConcurrentHashMap.newKeySet();
-	private final Set<String> playerLoadedChunks = ConcurrentHashMap.newKeySet();
-
-	private long TimerStart = 0;
-	private long TimerEnd = 0;
+	ENABLED_WARNING_MESSAGE = "pre-generator is already enabled.",
+	ENABLED_MESSAGE = "pre-generation has been enabled.",
+	COMPLETE = "pre-generation complete.",
+	DISABLED_WARNING_MESSAGE = "pre-generator is already disabled.",
+	DISABLED_MESSAGE = "pre-generation disabled.",
+	RADIUS_EXCEEDED_MESSAGE = "radius reached, To process more chunks please increase the radius.";
 
 	private static final boolean IS_PAPER = detectPaper();
-	private static final int SERVERMILLISECOND = 60;
+	private static final int TICK_MILLISECOND = 50;
+	private int SERVERMILLISECOND;
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
 	}
 
 	public synchronized void enable(int parallelTasksMultiplier, char timeUnit, int timeValue, int printTime, World world, long radius) {
-		if (enabled) {
-			cC.logS(cC.YELLOW, ENABLED_WARNING_MESSAGE);
+		String worldName = world.getName();
+		if (tasks.containsKey(worldName)) {
+			cC.logS(cC.YELLOW, worldName + " " + ENABLED_WARNING_MESSAGE);
 			return;
 		}
-		if (this.world != null && !this.world.equals(world)) {
-			totalChunksProcessed = 0;
-		}
-		this.world = world;
-		this.parallelTasksMultiplier = parallelTasksMultiplier;
-		this.timeUnit = timeUnit;
-		this.printTime = printTime;
-		this.timeValue = timeValue;
-		this.radius = radius;
-		enabled = true;
-		firstPrint = true;
-		complete = false;
-		currentWorldName = world.getName();
-		loadProcessedChunks();
-		if (totalChunksProcessed >= radius) {
-			cC.logS(cC.YELLOW, RADIUS_EXCEEDED_MESSAGE);
-			enabled = false;
+
+		PreGenerationTask task = new PreGenerationTask();
+		task.parallelTasksMultiplier = parallelTasksMultiplier;
+		task.timeUnit = timeUnit;
+		task.timeValue = timeValue;
+		task.printTime = printTime;
+		task.world = world;
+		task.radius = radius;
+		task.enabled = true;
+		task.firstPrint = true;
+		task.currentWorldName = worldName;
+		
+		if (world.getEnvironment() == Environment.NORMAL) {
+    		SERVERMILLISECOND = PluginSettings.world_SERVERMILLISECOND();
+    	} else if (world.getEnvironment() == Environment.NETHER) {
+    		SERVERMILLISECOND = PluginSettings.world_nether_SERVERMILLISECOND();
+    	} else if (world.getEnvironment() == Environment.THE_END) {
+    		SERVERMILLISECOND = PluginSettings.world_the_end_SERVERMILLISECOND();
+    	}
+
+		tasks.put(worldName, task);
+
+		loadProcessedChunks(task);
+		if (task.totalChunksProcessed >= radius) {
+			cC.logS(cC.YELLOW, worldName + " " + RADIUS_EXCEEDED_MESSAGE);
+			task.enabled = false;
 			return;
 		}
+
 		cC.logS(cC.GREEN, ENABLED_MESSAGE);
-		initializeSchedulers();
-		startGeneration();
-		startPrintInfoTimer();
+		initializeSchedulers(task);
+		startGeneration(task);
+		startPrintInfoTimer(task);
 	}
 
-	public synchronized void disable() {
-		if (!enabled) {
-			cC.logS(cC.YELLOW, DISABLED_WARNING_MESSAGE);
+	public synchronized void disable(World world) {
+		String worldName = world.getName();
+		PreGenerationTask task = tasks.get(worldName);
+		if (task == null || !task.enabled) {
+			cC.logS(cC.YELLOW, worldName + " " + DISABLED_WARNING_MESSAGE);
 			return;
 		}
-		terminate();
-		cC.logS(cC.RED, DISABLED_MESSAGE);
+
+		terminate(task);
+		tasks.remove(worldName);
+		cC.logS(cC.RED, worldName + " " + DISABLED_MESSAGE);
 	}
 
-	private void initializeSchedulers() {
-		scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
-		taskScheduler = Executors.newScheduledThreadPool(THREADS, Thread.ofVirtual().factory());
+	private void initializeSchedulers(PreGenerationTask task) {
+		task.scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
+		task.taskScheduler = Executors.newScheduledThreadPool(PluginSettings.THREADS(), Thread.ofVirtual().factory());
 	}
 
-	private synchronized void terminate() {
-		TimerEnd = System.currentTimeMillis();
-		saveProcessedChunks();
-		printInfo();
-		stopPrintInfoTimer();
-		shutdownSchedulers();
-		enabled = false;
+	private synchronized void terminate(PreGenerationTask task) {
+		task.TimerEnd = System.currentTimeMillis();
+		saveProcessedChunks(task);
+		printInfo(task);
+		stopPrintInfoTimer(task);
+		shutdownSchedulers(task);
+		task.enabled = false;
 	}
 
-	private void shutdownSchedulers() {
-		if (!enabled) {
+	private void shutdownSchedulers(PreGenerationTask task) {
+		if (!task.enabled) {
 			return;
 		}
-		if (scheduler != null && !scheduler.isShutdown()) {
-			scheduler.shutdownNow();
+		if (task.scheduler != null && !task.scheduler.isShutdown()) {
+			task.scheduler.shutdownNow();
 		}
-		if (taskScheduler != null && !taskScheduler.isShutdown()) {
-			taskScheduler.shutdownNow();
+		if (task.taskScheduler != null && !task.taskScheduler.isShutdown()) {
+			task.taskScheduler.shutdownNow();
 		}
 	}
 
-	private void startPrintInfoTimer() {
-		if (firstPrint) {
-			firstPrint = false;
-			cC.logSB("Available Processors: " + THREADS);
+	private void startPrintInfoTimer(PreGenerationTask task) {
+		if (task.firstPrint) {
+			task.firstPrint = false;
+			cC.logSB("Available Processors: " + PluginSettings.THREADS());
 		}
-		scheduler.scheduleAtFixedRate(this::printInfo, 0, printTime * TICK_MILLISECOND, TimeUnit.MILLISECONDS);
+		task.scheduler.scheduleAtFixedRate(() -> printInfo(task), 0, task.printTime * TICK_MILLISECOND, TimeUnit.MILLISECONDS);
 	}
 
-	private void stopPrintInfoTimer() {
-		if (!enabled) {
+	private void stopPrintInfoTimer(PreGenerationTask task) {
+		if (!task.enabled) {
 			return;
 		}
-		scheduler.shutdownNow();
-		long elapsedTime = (TimerEnd - TimerStart) / 1000;
+		task.scheduler.shutdownNow();
+		long elapsedTime = (task.TimerEnd - task.TimerStart) / 1000;
 		cC.logSB("Total time: " + cC.GOLD + formatElapsedTime(elapsedTime) + cC.RESET);
-		TimerStart = 0;
-		TimerEnd = 0;
+		task.TimerStart = 0;
+		task.TimerEnd = 0;
 	}
 
 	private String formatElapsedTime(long seconds) {
@@ -158,121 +153,122 @@ public class PreGenerator implements Listener {
 		return formattedTime.toString().trim();
 	}
 
-	private void startGeneration() {
-		TimerStart = System.currentTimeMillis();
+	private void startGeneration(PreGenerationTask task) {
+		task.TimerStart = System.currentTimeMillis();
 		if (IS_PAPER) {
-			for (int i = 0; i < parallelTasksMultiplier; i++) {
-				asyncProcess();
+			for (int i = 0; i < task.parallelTasksMultiplier; i++) {
+				asyncProcess(task);
 			}
 		} else {
 			new BukkitRunnable() {
 				@Override
 				public void run() {
-					tasks = Math.max(1, (int)(parallelTasksMultiplier / 2.5));
-					for (int i = 0; i < tasks; i++) {
-						syncProcess();
+					task.tasks = Math.max(1, (int)(task.parallelTasksMultiplier / 2.5));
+					for (int i = 0; i < task.tasks; i++) {
+						syncProcess(task);
 					}
 				}
 			}.runTaskTimer(plugin, 0L, 0L);
 		}
 	}
 
-	private void asyncProcess() {
-		if (!enabled) {
+	private void asyncProcess(PreGenerationTask task) {
+		if (!task.enabled) {
 			return;
 		}
-		taskScheduler.scheduleAtFixedRate(() -> {
-			if (totalChunksProcessed >= radius) {
+		task.taskScheduler.scheduleAtFixedRate(() -> {
+			if (task.totalChunksProcessed >= task.radius) {
 				return;
 			}
-			synchronized (this) {
-				currentX = x; currentZ = z;
-				updateCoordinates();
+			synchronized (task) {
+				task.currentX = task.x; task.currentZ = task.z;
+				updateCoordinates(task);
 			}
-			getChunkAsync(currentX, currentZ, true);
-			completionCheck();
+			getChunkAsync(task, task.currentX, task.currentZ, true);
+			completionCheck(task);
 		}, 0, SERVERMILLISECOND, TimeUnit.MILLISECONDS);
 	}
 
-	private void syncProcess() {
-		if (!enabled) {
+	private void syncProcess(PreGenerationTask task) {
+		if (!task.enabled) {
 			return;
 		}
-		if (totalChunksProcessed >= radius) {
+		if (task.totalChunksProcessed >= task.radius) {
 			return;
 		}
-		currentX = x; currentZ = z;
-		updateCoordinates();
-		handleChunk(currentX, currentZ);
-		completionCheck();
-		saveProcessedChunks();
+		task.currentX = task.x; task.currentZ = task.z;
+		updateCoordinates(task);
+		handleChunk(task, task.currentX, task.currentZ);
+		completionCheck(task);
+		saveProcessedChunks(task);
 	}
 
-	private void getChunkAsync(int x, int z, boolean gen) {
-		taskScheduler.execute(() -> {
-			world.getChunkAtAsync(x, z, gen);
-			saveProcessedChunks();
-			synchronized (this) {
-				totalChunksProcessed++;
-				chunksThisCycle++;
-				completionCheck();
+	private void getChunkAsync(PreGenerationTask task, int x, int z, boolean gen) {
+		task.taskScheduler.execute(() -> {
+			task.world.getChunkAtAsync(x, z, gen);
+			saveProcessedChunks(task);
+			synchronized (task) {
+				task.totalChunksProcessed++;
+				task.chunksThisCycle++;
+				completionCheck(task);
 			}
 		});
 	}
 
-	private void updateCoordinates() {
-		if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
-			int temp = dx;
-			dx = -dz;
-			dz = temp;
+	private void updateCoordinates(PreGenerationTask task) {
+		if (task.x == task.z || (task.x < 0 && task.x == -task.z) || (task.x > 0 && task.x == 1 - task.z)) {
+			int temp = task.dx;
+			task.dx = -task.dz;
+			task.dz = temp;
 		}
-		x += dx;
-		z += dz;
+		task.x += task.dx;
+		task.z += task.dz;
 	}
 
-	private void handleChunk(int x, int z) {
-		Chunk chunk = world.getChunkAt(x, z);
+	private void handleChunk(PreGenerationTask task, int x, int z) {
+		Chunk chunk = task.world.getChunkAt(x, z);
 		chunk.load(true);
 		while (chunk.getLoadLevel() == Chunk.LoadLevel.ENTITY_TICKING) {
-			boolean unloaded = world.unloadChunk(x, z, true);
+			boolean unloaded = task.world.unloadChunk(x, z, true);
 			if (!unloaded) {
 				break;
 			}
 		}
-		totalChunksProcessed++;
-		chunksThisCycle++;
+		task.totalChunksProcessed++;
+		task.chunksThisCycle++;
 	}
 
-	private void completionCheck() {
-		if (totalChunksProcessed >= radius) {
-			complete = true;
-			terminate();
+	private void completionCheck(PreGenerationTask task) {
+		if (task.totalChunksProcessed >= task.radius) {
+			task.complete = true;
+			terminate(task);
 		}
 	}
 
 	@EventHandler(priority = EventPriority.HIGHEST)
 	private void onChunkLoad(ChunkLoadEvent event) {
-		if (!enabled) {
+		PreGenerationTask task = tasks.get(event.getWorld().getName());
+		if (task == null || !task.enabled) {
 			return;
 		}
-		handleChunkLoad(event);
+		handleChunkLoad(task, event);
 	}
 
-	private void handleChunkLoad(ChunkLoadEvent event) {
+	private void handleChunkLoad(PreGenerationTask task, ChunkLoadEvent event) {
 		Chunk chunk = event.getChunk();
 		World chunkWorld = chunk.getWorld();
 		String chunkId = getChunkId(chunk);
-		if (chunk == null || playerLoadedChunks.contains(chunkId)) {
+		if (chunk == null || task.playerLoadedChunks.contains(chunkId)) {
 			return;
 		}
 		chunkId = getChunkId(chunk);
-		if (!event.isNewChunk() && !playerLoadedChunks.contains(chunkId)) {
-			chunkWorld.unloadChunk(x, z, true);
+		if (!event.isNewChunk() && !task.playerLoadedChunks.contains(chunkId)) {
+			chunkWorld.unloadChunk(task.x, task.z, true);
 		} else {
-			playerLoadedChunks.add(chunkId);
+			task.playerLoadedChunks.add(chunkId);
 		}
 		if (IS_PAPER) {
-		asyncUnloadCheck(chunk, chunkId);
+			asyncUnloadCheck(task, chunk, chunkId);
 		}
 	}
 
@@ -280,11 +276,11 @@ public class PreGenerator implements Listener {
 		return chunk.getWorld().getName() + "_" + chunk.getX() + "_" + chunk.getZ();
 	}
 
-	private void asyncUnloadCheck(Chunk chunk, String chunkId) {
-		if (scheduledChunks.add(chunkId)) {
-			taskScheduler.execute(() -> {
+	private void asyncUnloadCheck(PreGenerationTask task, Chunk chunk, String chunkId) {
+		if (task.scheduledChunks.add(chunkId)) {
+			task.taskScheduler.execute(() -> {
 				try {
-					while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING && !playerLoadedChunks.contains(chunkId)) {
+					while (chunk.getLoadLevel() == Chunk.LoadLevel.TICKING && !task.playerLoadedChunks.contains(chunkId)) {
 						boolean unloaded = chunk.unload(true);
 						if (!unloaded) {
 							break;
@@ -293,7 +289,7 @@ public class PreGenerator implements Listener {
 				} catch (Exception e) {
 					e.printStackTrace();
 				} finally {
-					scheduledChunks.remove(chunkId);
+					task.scheduledChunks.remove(chunkId);
 				}
 			});
 		}
@@ -305,84 +301,85 @@ public class PreGenerator implements Listener {
 		if (chunk == null) {
 			return;
 		}
-		playerLoadedChunks.add(getChunkId(chunk));
+		tasks.values().forEach(task -> task.playerLoadedChunks.add(getChunkId(chunk)));
 	}
 
-	private void printInfo() {
-		localChunksThisCycle = chunksThisCycle;
-		chunksPerSec = localChunksThisCycle / timeValue;
-		logProgress();
-		resetCycleCounts();
+	private void printInfo(PreGenerationTask task) {
+		task.localChunksThisCycle = task.chunksThisCycle;
+		task.chunksPerSec = task.localChunksThisCycle / task.timeValue;
+		logProgress(task);
+		resetCycleCounts(task);
 	}
 
-	private void logProgress() {
-		int radiusWidth = String.valueOf(radius).length();
-		String worldStr = cC.logO(cC.GOLD, currentWorldName);
-		String processed = cC.fA(cC.GOLD, localChunksThisCycle, 4);
-		String perSecond = cC.fA(cC.GOLD, chunksPerSec, 4);
-		String completion = cC.fA(cC.GOLD, totalChunksProcessed, radiusWidth);
-		String radiusStr = cC.fA(cC.GOLD, radius, radiusWidth);
+	private void logProgress(PreGenerationTask task) {
+		World thisTaskWorld = task.world;
+		int radiusWidth = String.valueOf(task.radius).length();
+		String worldStr = cC.logO(cC.GOLD, task.currentWorldName);
+		String processed = cC.fA(cC.GOLD, task.localChunksThisCycle, 4);
+		String perSecond = cC.fA(cC.GOLD, task.chunksPerSec, 4);
+		String completion = cC.fA(cC.GOLD, task.totalChunksProcessed, radiusWidth);
+		String radiusStr = cC.fA(cC.GOLD, task.radius, radiusWidth);
 		String logFormat = "[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks";
 
-		if (enabled && !complete) {
-			cC.logSB(String.format(logFormat, worldStr, processed, timeUnit, perSecond, completion, radiusStr));
-		} else if (complete && localChunksThisCycle != 0 && chunksPerSec != 0) {
-			cC.logSB(String.format(logFormat, worldStr, processed, timeUnit, perSecond, radiusStr, radiusStr));
-			cC.logS(cC.GREEN, COMPLETE);
+		if (task.enabled && !task.complete) {
+			cC.logSB(String.format(logFormat, worldStr, processed, task.timeUnit, perSecond, completion, radiusStr));
+		} else if (task.complete && task.localChunksThisCycle != 0 && task.chunksPerSec != 0) {
+			cC.logSB(String.format(logFormat, worldStr, processed, task.timeUnit, perSecond, radiusStr, radiusStr));
+			cC.logS(cC.GREEN, thisTaskWorld + " " + COMPLETE);
 		}
 	}
 
-	private void resetCycleCounts() {
-		chunksPerSec = 0;
-		localChunksThisCycle = 0;
-		chunksThisCycle = 0;
+	private void resetCycleCounts(PreGenerationTask task) {
+		task.chunksPerSec = 0;
+		task.localChunksThisCycle = 0;
+		task.chunksThisCycle = 0;
 	}
 
-	private void saveProcessedChunks() {
-		if (!enabled) {
+	private void saveProcessedChunks(PreGenerationTask task) {
+		if (!task.enabled) {
 			return;
 		}
 		File dataFolder = plugin.getDataFolder();
 		if (!dataFolder.exists()) {
 			dataFolder.mkdirs();
 		}
-		File dataFile = new File(dataFolder, currentWorldName + "_pregenerator.txt");
+		File dataFile = new File(dataFolder, task.currentWorldName + "_pregenerator.txt");
 		String data;
-		synchronized (this) {
-			data = String.format("%d_%d_%d_%d%n%d", x, z, dx, dz, totalChunksProcessed);
+		synchronized (task) {
+			data = String.format("%d_%d_%d_%d%n%d", task.x, task.z, task.dx, task.dz, task.totalChunksProcessed);
 		}
 		try {
 			Files.writeString(dataFile.toPath(), data);
 		} catch (IOException e) {
 			e.printStackTrace();
-			cC.logS(cC.RED, "Failed to save processed chunks for " + currentWorldName);
+			cC.logS(cC.RED, "Failed to save processed chunks for " + task.currentWorldName);
 		}
 	}
 
-	private void loadProcessedChunks() {
-		File dataFile = new File(plugin.getDataFolder(), currentWorldName + "_pregenerator.txt");
+	private void loadProcessedChunks(PreGenerationTask task) {
+		File dataFile = new File(plugin.getDataFolder(), task.currentWorldName + "_pregenerator.txt");
 		if (dataFile.exists()) {
 			try {
 				var lines = Files.readAllLines(dataFile.toPath());
 				if (lines.size() > 0) {
 					var coords = lines.get(0).split("_");
 					if (coords.length == 4) {
-						x = Integer.parseInt(coords[0]);
-						z = Integer.parseInt(coords[1]);
-						dx = Integer.parseInt(coords[2]);
-						dz = Integer.parseInt(coords[3]);
+						task.x = Integer.parseInt(coords[0]);
+						task.z = Integer.parseInt(coords[1]);
+						task.dx = Integer.parseInt(coords[2]);
+						task.dz = Integer.parseInt(coords[3]);
 					}
 				}
 				if (lines.size() > 1) {
-					totalChunksProcessed = Long.parseLong(lines.get(1));
+					task.totalChunksProcessed = Long.parseLong(lines.get(1));
 				}
-				cC.logSB("Loaded " + totalChunksProcessed + " processed chunks from: " + cC.GOLD + currentWorldName + cC.RESET);
+				cC.logSB("Loaded " + task.totalChunksProcessed + " processed chunks from: " + cC.GOLD + task.currentWorldName + cC.RESET);
 			} catch (IOException | NumberFormatException e) {
 				e.printStackTrace();
-				cC.logS(cC.RED, "Failed to load processed chunks for " + currentWorldName);
+				cC.logS(cC.RED, "Failed to load processed chunks for " + task.currentWorldName);
 			}
 		} else {
-			x = 0; z = 0; dx = 0; dz = -1;
+			task.x = 0; task.z = 0; task.dx = 0; task.dz = -1;
 		}
 	}
 
