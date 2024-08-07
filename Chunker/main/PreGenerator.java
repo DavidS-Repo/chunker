@@ -56,14 +56,14 @@ public class PreGenerator implements Listener {
 		task.enabled = true;
 		task.firstPrint = true;
 		task.currentWorldName = worldName;
-		
+
 		if (world.getEnvironment() == Environment.NORMAL) {
-    		SERVERMILLISECOND = PluginSettings.world_SERVERMILLISECOND();
-    	} else if (world.getEnvironment() == Environment.NETHER) {
-    		SERVERMILLISECOND = PluginSettings.world_nether_SERVERMILLISECOND();
-    	} else if (world.getEnvironment() == Environment.THE_END) {
-    		SERVERMILLISECOND = PluginSettings.world_the_end_SERVERMILLISECOND();
-    	}
+			SERVERMILLISECOND = PluginSettings.world_SERVERMILLISECOND();
+		} else if (world.getEnvironment() == Environment.NETHER) {
+			SERVERMILLISECOND = PluginSettings.world_nether_SERVERMILLISECOND();
+		} else if (world.getEnvironment() == Environment.THE_END) {
+			SERVERMILLISECOND = PluginSettings.world_the_end_SERVERMILLISECOND();
+		}
 
 		tasks.put(worldName, task);
 
@@ -314,12 +314,12 @@ public class PreGenerator implements Listener {
 	private void logProgress(PreGenerationTask task) {
 		World thisTaskWorld = task.world;
 		int radiusWidth = String.valueOf(task.radius).length();
-		String worldStr = cC.logO(cC.GOLD, task.currentWorldName);
+		String worldStr = cC.logO(cC.GOLD, cC.padWorldName(task.currentWorldName, 13));
 		String processed = cC.fA(cC.GOLD, task.localChunksThisCycle, 4);
 		String perSecond = cC.fA(cC.GOLD, task.chunksPerSec, 4);
 		String completion = cC.fA(cC.GOLD, task.totalChunksProcessed, radiusWidth);
 		String radiusStr = cC.fA(cC.GOLD, task.radius, radiusWidth);
-		String logFormat = "[%s] Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks";
+		String logFormat = "%s Processed: %s Chunks/%s: %s Completed: %s out of %s Chunks";
 
 		if (task.enabled && !task.complete) {
 			cC.logSB(String.format(logFormat, worldStr, processed, task.timeUnit, perSecond, completion, radiusStr));
