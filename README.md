@@ -1,3 +1,11 @@
+# Chunker
+#### Supported MC Versions:
+Minecraft 1.20.5+ (Java 21 or higher)
+
+#### Supported Severs: 
+Spigot, Bukkit, Paper, Pufferfish, Purpur
+
+
 # Overview
 Chunker is designed to be more efficient and resilient compared to traditional pre-generators. Traditional pre-generators often keep track of hundreds of thousands of chunks in memory, leading to significant issues in the event of a crash. Chunker's approach minimizes the amount of data tracked, reducing the impact of crashes and improving overall performance.
 
