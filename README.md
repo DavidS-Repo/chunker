@@ -121,7 +121,7 @@ chunk-system:
   - **Chunks per second:** Avg. ~208 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
   - **Time:** Finished in 48 Seconds
 
-![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/8_1_2024_pregen_12_5s_world_100c.png)
+![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/8_11_2024_pregen_12_5s_world_100c.png)
 
 #### Summary:
 - **Load Management:** Determines the load on your server. Scales linearly ~ 17-18 chunks per `ParallelTasksMultiplier`.
