@@ -9,12 +9,12 @@
 # parallel_tasks_multiplier: Sets the number of async tasks running concurrently. 'auto' will distribute the tasks based on your thread count.
 # You can also set a specific integer value (e.g., 2, 4). It's recommended to stay below your total thread count.
 # Example with 'auto' and 12 threads:
-#   - world: 
-	    parallel_tasks_multiplier: 4
-#   - world_nether: 
-	    parallel_tasks_multiplier: 4
-#   - world_the_end: 
-	    parallel_tasks_multiplier: 4
+# world: 
+#   parallel_tasks_multiplier: 4
+# world_nether: 
+#   parallel_tasks_multiplier: 4
+# world_the_end: 
+#   parallel_tasks_multiplier: 4
 
 # print_update_delay: How often to print information (s-Seconds, m-Minutes, h-Hours). Default is 5s (5 seconds).
 
