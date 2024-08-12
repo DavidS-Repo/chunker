@@ -10,19 +10,22 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.stream.Collectors;
 
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
-	private final PreGenerator preGenerator; 
-	private long worldBorder; 
-	private int timeValue; 
-	private long radiusValue; 
+	private final PreGenerator preGenerator;
+	private long worldBorder;
+	private int timeValue;
+	private long radiusValue;
 	private char timeUnit, radiusUnit;
-	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000; 
-	private static final String 
+	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000;
+	private final Set<String> enabledWorlds = new HashSet<>();
+	private static final String
 	WARNING_MESSAGE = "Invalid numbers provided.", 
-	USAGE_MESSAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>"; 
+	USAGE_MESSAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>";
 
 	public PreGeneratorCommands(PreGenerator preGenerator, PluginSettings settings) {
 		this.preGenerator = preGenerator;
@@ -35,7 +38,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				handlePreGenCommand(sender, args);
 				return true;
 			} else {
-				sender.sendMessage(USAGE_MESSAGE);
+				cC.sendS(sender, cC.RED, USAGE_MESSAGE);
 				return true;
 			}
 		} else if (label.equalsIgnoreCase("pregenoff")) {
@@ -51,7 +54,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			String printTimeArg = args[1];
 			int printTime = parseTime(printTimeArg);
 			if (printTime < 0) {
-				sender.sendMessage(WARNING_MESSAGE);
+				cC.sendS(sender, cC.RED, WARNING_MESSAGE);
 				return;
 			}
 			String worldName = args[2];
@@ -63,31 +66,33 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			}
 			long radius = parseRadius(args[3]);
 			if (radius < 0) {
-				sender.sendMessage(WARNING_MESSAGE);
+				cC.sendS(sender, cC.RED, WARNING_MESSAGE);
 				return;
 			}
 			preGenerator.enable(parallelTasksMultiplier, timeUnit, timeValue, printTime, world, radius);
+			enabledWorlds.add(worldName);
 		} catch (NumberFormatException e) {
-			sender.sendMessage(WARNING_MESSAGE);
+			cC.sendS(sender, cC.RED, WARNING_MESSAGE);
 		}
 	}
 
 	public void handlePreGenOffCommand(CommandSender sender, String[] args) {
 		if (args.length == 0) {
-			// Turn off pre-generation for all worlds
-			for (World world : Bukkit.getWorlds()) {
-				preGenerator.disable(world);
+			for (String worldName : enabledWorlds) {
+				preGenerator.disable(Bukkit.getWorld(worldName));
 			}
+			enabledWorlds.clear();
 		} else if (args.length == 1) {
 			String worldName = args[0];
 			World world = Bukkit.getWorld(worldName);
 			if (world == null) {
-				sender.sendMessage("World not found: " + worldName);
+				cC.sendS(sender, cC.RED, "World not found: " + worldName);
 				return;
 			}
 			preGenerator.disable(world);
+			enabledWorlds.remove(worldName);
 		} else {
-			sender.sendMessage("Usage: /pregenoff [world]");
+			cC.sendS(sender, cC.RED, "Usage: /pregenoff [world]");
 		}
 	}
 
@@ -133,37 +138,40 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	public void checkAndRunAutoPreGenerators() {
-		int totalCores = PluginSettings.THREADS();
-		int autoRunCount = 0;
+	    int totalCores = PluginSettings.THREADS();
+	    int autoRunCount = 0;
 
-		if (PluginSettings.world_autoRun()) autoRunCount++;
-		if (PluginSettings.world_nether_autoRun()) autoRunCount++;
-		if (PluginSettings.world_the_end_autoRun()) autoRunCount++;
+	    if (PluginSettings.world_auto_run()) autoRunCount++;
+	    if (PluginSettings.world_nether_auto_run()) autoRunCount++;
+	    if (PluginSettings.world_the_end_auto_run()) autoRunCount++;
 
-		if (autoRunCount == 0) return;
+	    if (autoRunCount == 0) return;
 
-		int coresPerTask = totalCores / autoRunCount;
+	    int coresPerTask = totalCores / autoRunCount;
 
-		if (PluginSettings.world_autoRun() && Bukkit.getWorld("world") != null && Bukkit.getOnlinePlayers().isEmpty()) {
-			int world_printTime = parseTime(PluginSettings.world_PrintUpdateDelayin());
-			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world"));
-			long a = parseRadius(PluginSettings.world_radius());
-			preGenerator.enable(coresPerTask, timeUnit, timeValue, world_printTime, Bukkit.getWorld("world"), a);
-		}
+	    if (PluginSettings.world_auto_run() && Bukkit.getWorld("world") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+	        int world_printTime = parseTime(PluginSettings.world_print_update_delay());
+	        worldBorder = calculateChunksInBorder(Bukkit.getWorld("world"));
+	        long a = parseRadius(PluginSettings.world_radius());
+	        preGenerator.enable(coresPerTask, timeUnit, timeValue, world_printTime, Bukkit.getWorld("world"), a);
+	        enabledWorlds.add("world");
+	    }
 
-		if (PluginSettings.world_nether_autoRun() && Bukkit.getWorld("world_nether") != null && Bukkit.getOnlinePlayers().isEmpty()) {
-			int world_nether_printTime = parseTime(PluginSettings.world_nether_PrintUpdateDelayin());
-			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_nether"));
-			long b = parseRadius(PluginSettings.world_nether_radius());
-			preGenerator.enable(coresPerTask, timeUnit, timeValue, world_nether_printTime, Bukkit.getWorld("world_nether"), b);
-		}
+	    if (PluginSettings.world_nether_auto_run() && Bukkit.getWorld("world_nether") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+	        int world_nether_printTime = parseTime(PluginSettings.world_nether_print_update_delay());
+	        worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_nether"));
+	        long b = parseRadius(PluginSettings.world_nether_radius());
+	        preGenerator.enable(coresPerTask, timeUnit, timeValue, world_nether_printTime, Bukkit.getWorld("world_nether"), b);
+	        enabledWorlds.add("world_nether");
+	    }
 
-		if (PluginSettings.world_the_end_autoRun() && Bukkit.getWorld("world_the_end") != null && Bukkit.getOnlinePlayers().isEmpty()) {
-			int world_the_end_printTime = parseTime(PluginSettings.world_the_end_PrintUpdateDelayin());
-			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_the_end"));
-			long c = parseRadius(PluginSettings.world_the_end_radius());
-			preGenerator.enable(coresPerTask, timeUnit, timeValue, world_the_end_printTime, Bukkit.getWorld("world_the_end"), c);
-		}
+	    if (PluginSettings.world_the_end_auto_run() && Bukkit.getWorld("world_the_end") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+	        int world_the_end_printTime = parseTime(PluginSettings.world_the_end_print_update_delay());
+	        worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_the_end"));
+	        long c = parseRadius(PluginSettings.world_the_end_radius());
+	        preGenerator.enable(coresPerTask, timeUnit, timeValue, world_the_end_printTime, Bukkit.getWorld("world_the_end"), c);
+	        enabledWorlds.add("world_the_end");
+	    }
 	}
 
 	public long calculateChunksInBorder(World world) {

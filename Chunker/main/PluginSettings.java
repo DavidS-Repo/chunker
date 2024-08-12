@@ -17,16 +17,14 @@ public class PluginSettings {
 	}
 
 	private void initializeConfig() {
-	    // Create the plugin data folder if it doesn't exist
-	    if (!plugin.getDataFolder().exists()) {
-	        plugin.getDataFolder().mkdirs();
-	    }
-
-	    File configFile = new File(plugin.getDataFolder(), "settings.yml");
-	    if (!configFile.exists()) {
-	        extractDefaultConfig(configFile);
-	    }
-	    loadConfig();
+		if (!plugin.getDataFolder().exists()) {
+			plugin.getDataFolder().mkdirs();
+		}
+		File configFile = new File(plugin.getDataFolder(), "settings.yml");
+		if (!configFile.exists()) {
+			extractDefaultConfig(configFile);
+		}
+		loadConfig();
 	}
 
 	private void extractDefaultConfig(File configFile) {
@@ -55,24 +53,24 @@ public class PluginSettings {
 
 	private void loadDefaults() {
 		// Overworld
-		config.addDefault("world.autoRun", false);
-		config.addDefault("world.SERVERMILLISECOND", 60);
-		config.addDefault("world.parallelTasksMultiplier", "default");
-		config.addDefault("world.PrintUpdateDelayin", "5s");
+		config.addDefault("world.auto_run", false);
+		config.addDefault("world.task_queue_timer", 60);
+		config.addDefault("world.parallel_tasks_multiplier", "auto");
+		config.addDefault("world.print_update_delay", "5s");
 		config.addDefault("world.radius", "default");
 
 		// Nether
-		config.addDefault("world_nether.autoRun", false);
-		config.addDefault("world_nether.SERVERMILLISECOND", 30);
-		config.addDefault("world_nether.parallelTasksMultiplier", "default");
-		config.addDefault("world_nether.PrintUpdateDelayin", "5s");
+		config.addDefault("world_nether.auto_run", false);
+		config.addDefault("world_nether.task_queue_timer", 30);
+		config.addDefault("world_nether.parallel_tasks_multiplier", "auto");
+		config.addDefault("world_nether.print_update_delay", "5s");
 		config.addDefault("world_nether.radius", "default");
 
 		// End
-		config.addDefault("world_the_end.autoRun", false);
-		config.addDefault("world_the_end.SERVERMILLISECOND", 8);
-		config.addDefault("world_the_end.parallelTasksMultiplier", "default");
-		config.addDefault("world_the_end.PrintUpdateDelayin", "5s");
+		config.addDefault("world_the_end.auto_run", false);
+		config.addDefault("world_the_end.task_queue_timer", 15);
+		config.addDefault("world_the_end.parallel_tasks_multiplier", "auto");
+		config.addDefault("world_the_end.print_update_delay", "5s");
 		config.addDefault("world_the_end.radius", "default");
 
 		config.options().copyDefaults(true);
@@ -100,66 +98,66 @@ public class PluginSettings {
 	}
 
 	// Overworld
-	public static boolean world_autoRun() {
-		return config.getBoolean("world.autoRun");
+	public static boolean world_auto_run() {
+		return config.getBoolean("world.auto_run");
 	}
 
-	public static int world_SERVERMILLISECOND() {
-		return config.getInt("world.SERVERMILLISECOND");
+	public static int world_task_queue_timer() {
+		return config.getInt("world.task_queue_timer");
 	}
 
-	public static String world_parallelTasksMultiplier() {
-		return config.getString("world.parallelTasksMultiplier");
+	public static String world_parallel_tasks_multiplier() {
+		return config.getString("world.parallel_tasks_multiplier");
 	}
 
-	public static String world_PrintUpdateDelayin() {
-		return config.getString("world.PrintUpdateDelayin");
+	public static String world_print_update_delay() {
+		return config.getString("world.print_update_delay");
 	}
 
 	public static String world_radius() {
-	    return config.getString("world.radius", "default");
+		return config.getString("world.radius", "default");
 	}
 
 	// Nether
-	public static boolean world_nether_autoRun() {
-		return config.getBoolean("world_nether.autoRun");
+	public static boolean world_nether_auto_run() {
+		return config.getBoolean("world_nether.auto_run");
 	}
 
-	public static int world_nether_SERVERMILLISECOND() {
-		return config.getInt("world_nether.SERVERMILLISECOND");
+	public static int world_nether_task_queue_timer() {
+		return config.getInt("world_nether.task_queue_timer");
 	}
 
-	public static String world_nether_parallelTasksMultiplier() {
-		return config.getString("world_nether.parallelTasksMultiplier");
+	public static String world_nether_parallel_tasks_multiplier() {
+		return config.getString("world_nether.parallel_tasks_multiplier");
 	}
 
-	public static String world_nether_PrintUpdateDelayin() {
-		return config.getString("world_nether.PrintUpdateDelayin");
+	public static String world_nether_print_update_delay() {
+		return config.getString("world_nether.print_update_delay");
 	}
 
 	public static String world_nether_radius() {
-	    return config.getString("world_nether.radius", "default"); 
+		return config.getString("world_nether.radius", "default"); 
 	}
 
 	// End
-	public static boolean world_the_end_autoRun() {
-		return config.getBoolean("world_the_end.autoRun");
+	public static boolean world_the_end_auto_run() {
+		return config.getBoolean("world_the_end.auto_run");
 	}
 
-	public static int world_the_end_SERVERMILLISECOND() {
-		return config.getInt("world_the_end.SERVERMILLISECOND");
+	public static int world_the_end_task_queue_timer() {
+		return config.getInt("world_the_end.task_queue_timer");
 	}
 
-	public static String world_the_end_parallelTasksMultiplier() {
-		return config.getString("world_the_end.parallelTasksMultiplier");
+	public static String world_the_end_parallel_tasks_multiplier() {
+		return config.getString("world_the_end.parallel_tasks_multiplier");
 	}
 
-	public static String world_the_end_PrintUpdateDelayin() {
-		return config.getString("world_the_end.PrintUpdateDelayin");
+	public static String world_the_end_print_update_delay() {
+		return config.getString("world_the_end.print_update_delay");
 	}
 
 	public static String world_the_end_radius() {
-	    return config.getString("world_the_end.radius", "default");
+		return config.getString("world_the_end.radius", "default");
 	}
 
 	public final static int THREADS() {

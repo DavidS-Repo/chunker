@@ -25,18 +25,17 @@ public class PreGenerator implements Listener {
 
 	private static final String 
 	ENABLED_WARNING_MESSAGE = "pre-generator is already enabled.",
-	ENABLED_MESSAGE = "pre-generation has been enabled.",
 	COMPLETE = "pre-generation complete.",
 	DISABLED_WARNING_MESSAGE = "pre-generator is already disabled.",
-	DISABLED_MESSAGE = "pre-generation disabled.",
 	RADIUS_EXCEEDED_MESSAGE = "radius reached, To process more chunks please increase the radius.";
 
 	private static final boolean IS_PAPER = detectPaper();
 	private static final int TICK_MILLISECOND = 50;
-	private int SERVERMILLISECOND;
+	private int task_queue_timer;
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
+		cC.logSB("Available Processors: " + PluginSettings.THREADS());
 	}
 
 	public synchronized void enable(int parallelTasksMultiplier, char timeUnit, int timeValue, int printTime, World world, long radius) {
@@ -58,11 +57,11 @@ public class PreGenerator implements Listener {
 		task.currentWorldName = worldName;
 
 		if (world.getEnvironment() == Environment.NORMAL) {
-			SERVERMILLISECOND = PluginSettings.world_SERVERMILLISECOND();
+			task_queue_timer = PluginSettings.world_task_queue_timer();
 		} else if (world.getEnvironment() == Environment.NETHER) {
-			SERVERMILLISECOND = PluginSettings.world_nether_SERVERMILLISECOND();
+			task_queue_timer = PluginSettings.world_nether_task_queue_timer();
 		} else if (world.getEnvironment() == Environment.THE_END) {
-			SERVERMILLISECOND = PluginSettings.world_the_end_SERVERMILLISECOND();
+			task_queue_timer = PluginSettings.world_the_end_task_queue_timer();
 		}
 
 		tasks.put(worldName, task);
@@ -74,7 +73,6 @@ public class PreGenerator implements Listener {
 			return;
 		}
 
-		cC.logS(cC.GREEN, ENABLED_MESSAGE);
 		initializeSchedulers(task);
 		startGeneration(task);
 		startPrintInfoTimer(task);
@@ -90,7 +88,6 @@ public class PreGenerator implements Listener {
 
 		terminate(task);
 		tasks.remove(worldName);
-		cC.logS(cC.RED, worldName + " " + DISABLED_MESSAGE);
 	}
 
 	private void initializeSchedulers(PreGenerationTask task) {
@@ -120,10 +117,6 @@ public class PreGenerator implements Listener {
 	}
 
 	private void startPrintInfoTimer(PreGenerationTask task) {
-		if (task.firstPrint) {
-			task.firstPrint = false;
-			cC.logSB("Available Processors: " + PluginSettings.THREADS());
-		}
 		task.scheduler.scheduleAtFixedRate(() -> printInfo(task), 0, task.printTime * TICK_MILLISECOND, TimeUnit.MILLISECONDS);
 	}
 
@@ -133,7 +126,7 @@ public class PreGenerator implements Listener {
 		}
 		task.scheduler.shutdownNow();
 		long elapsedTime = (task.TimerEnd - task.TimerStart) / 1000;
-		cC.logSB("Total time: " + cC.GOLD + formatElapsedTime(elapsedTime) + cC.RESET);
+		cC.logSB("Total time: " + formatElapsedTime(elapsedTime));
 		task.TimerStart = 0;
 		task.TimerEnd = 0;
 	}
@@ -186,7 +179,7 @@ public class PreGenerator implements Listener {
 			}
 			getChunkAsync(task, task.currentX, task.currentZ, true);
 			completionCheck(task);
-		}, 0, SERVERMILLISECOND, TimeUnit.MILLISECONDS);
+		}, 0, task_queue_timer, TimeUnit.MILLISECONDS);
 	}
 
 	private void syncProcess(PreGenerationTask task) {
