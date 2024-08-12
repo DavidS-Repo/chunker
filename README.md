@@ -111,17 +111,17 @@ chunk-system:
 ### Performance Examples:
 - **ParallelTasksMultiplier = 6:**
   - **Command:** `/pregen 6 5s world 100c`
-  - **Chunks per second:** Avg. ~104 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
-  - **Time:** Finished in 1 Minute 36 Seconds
+  - **Chunks per second:** Avg. ~100 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
+  - **Time:** Finished in 1 Minute 39 Seconds
 
-![ParallelTasksMultiplier = 1](https://www.toolsnexus.com/mc/8_11_2024_pregen_6_5s_world_100c.png)
+![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/8_11_2024_pregen_6_5s_world_100c.png)
 
 - **ParallelTasksMultiplier = 12:**
   - **Command:** `/pregen 12 5s world 100c`
-  - **Chunks per second:** Avg. ~208 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
-  - **Time:** Finished in 48 Seconds
+  - **Chunks per second:** Avg. ~200 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
+  - **Time:** Finished in 49 Seconds
 
-![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/8_11_2024_pregen_12_5s_world_100c.png)
+![ParallelTasksMultiplier = 12](https://www.toolsnexus.com/mc/8_11_2024_pregen_12_5s_world_100c.png)
 
 #### Summary:
 - **Load Management:** Determines the load on your server. Scales linearly ~ 17-18 chunks per `ParallelTasksMultiplier`.
