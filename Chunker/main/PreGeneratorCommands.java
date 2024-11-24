@@ -10,9 +10,11 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
@@ -138,40 +140,83 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	public void checkAndRunAutoPreGenerators() {
-	    int totalCores = PluginSettings.THREADS();
-	    int autoRunCount = 0;
+		int totalCores = PluginSettings.THREADS();
+		int autoRunCount = 0;
+		Map<String, Integer> coresPerTaskMap = new HashMap<>();
 
-	    if (PluginSettings.world_auto_run()) autoRunCount++;
-	    if (PluginSettings.world_nether_auto_run()) autoRunCount++;
-	    if (PluginSettings.world_the_end_auto_run()) autoRunCount++;
+		// Retrieve parallel tasks multiplier values
+		String worldMultiplier = PluginSettings.world_parallel_tasks_multiplier();
+		String netherMultiplier = PluginSettings.world_nether_parallel_tasks_multiplier();
+		String endMultiplier = PluginSettings.world_the_end_parallel_tasks_multiplier();
 
-	    if (autoRunCount == 0) return;
+		// Pre-calculate fixed core assignments for worlds with explicit numbers
+		if (PluginSettings.world_auto_run()) {
+			if (!"auto".equalsIgnoreCase(worldMultiplier)) {
+				coresPerTaskMap.put("world", Integer.parseInt(worldMultiplier));
+				totalCores -= coresPerTaskMap.get("world");
+			} else {
+				autoRunCount++;
+			}
+		}
 
-	    int coresPerTask = totalCores / autoRunCount;
+		if (PluginSettings.world_nether_auto_run()) {
+			if (!"auto".equalsIgnoreCase(netherMultiplier)) {
+				coresPerTaskMap.put("world_nether", Integer.parseInt(netherMultiplier));
+				totalCores -= coresPerTaskMap.get("world_nether");
+			} else {
+				autoRunCount++;
+			}
+		}
 
-	    if (PluginSettings.world_auto_run() && Bukkit.getWorld("world") != null && Bukkit.getOnlinePlayers().isEmpty()) {
-	        int world_printTime = parseTime(PluginSettings.world_print_update_delay());
-	        worldBorder = calculateChunksInBorder(Bukkit.getWorld("world"));
-	        long a = parseRadius(PluginSettings.world_radius());
-	        preGenerator.enable(coresPerTask, timeUnit, timeValue, world_printTime, Bukkit.getWorld("world"), a);
-	        enabledWorlds.add("world");
-	    }
+		if (PluginSettings.world_the_end_auto_run()) {
+			if (!"auto".equalsIgnoreCase(endMultiplier)) {
+				coresPerTaskMap.put("world_the_end", Integer.parseInt(endMultiplier));
+				totalCores -= coresPerTaskMap.get("world_the_end");
+			} else {
+				autoRunCount++;
+			}
+		}
 
-	    if (PluginSettings.world_nether_auto_run() && Bukkit.getWorld("world_nether") != null && Bukkit.getOnlinePlayers().isEmpty()) {
-	        int world_nether_printTime = parseTime(PluginSettings.world_nether_print_update_delay());
-	        worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_nether"));
-	        long b = parseRadius(PluginSettings.world_nether_radius());
-	        preGenerator.enable(coresPerTask, timeUnit, timeValue, world_nether_printTime, Bukkit.getWorld("world_nether"), b);
-	        enabledWorlds.add("world_nether");
-	    }
+		// Distribute remaining cores equally for auto worlds
+		int coresPerTaskForAuto = autoRunCount > 0 ? totalCores / autoRunCount : 0;
 
-	    if (PluginSettings.world_the_end_auto_run() && Bukkit.getWorld("world_the_end") != null && Bukkit.getOnlinePlayers().isEmpty()) {
-	        int world_the_end_printTime = parseTime(PluginSettings.world_the_end_print_update_delay());
-	        worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_the_end"));
-	        long c = parseRadius(PluginSettings.world_the_end_radius());
-	        preGenerator.enable(coresPerTask, timeUnit, timeValue, world_the_end_printTime, Bukkit.getWorld("world_the_end"), c);
-	        enabledWorlds.add("world_the_end");
-	    }
+		if (PluginSettings.world_auto_run() && "auto".equalsIgnoreCase(worldMultiplier)) {
+			coresPerTaskMap.put("world", coresPerTaskForAuto);
+		}
+		if (PluginSettings.world_nether_auto_run() && "auto".equalsIgnoreCase(netherMultiplier)) {
+			coresPerTaskMap.put("world_nether", coresPerTaskForAuto);
+		}
+		if (PluginSettings.world_the_end_auto_run() && "auto".equalsIgnoreCase(endMultiplier)) {
+			coresPerTaskMap.put("world_the_end", coresPerTaskForAuto);
+		}
+
+		// Exit if no worlds to process
+		if (coresPerTaskMap.isEmpty()) return;
+
+		// Process worlds based on calculated core assignments
+		if (PluginSettings.world_auto_run() && Bukkit.getWorld("world") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+			int worldPrintTime = parseTime(PluginSettings.world_print_update_delay());
+			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world"));
+			long worldRadius = parseRadius(PluginSettings.world_radius());
+			preGenerator.enable(coresPerTaskMap.get("world"), timeUnit, timeValue, worldPrintTime, Bukkit.getWorld("world"), worldRadius);
+			enabledWorlds.add("world");
+		}
+
+		if (PluginSettings.world_nether_auto_run() && Bukkit.getWorld("world_nether") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+			int netherPrintTime = parseTime(PluginSettings.world_nether_print_update_delay());
+			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_nether"));
+			long netherRadius = parseRadius(PluginSettings.world_nether_radius());
+			preGenerator.enable(coresPerTaskMap.get("world_nether"), timeUnit, timeValue, netherPrintTime, Bukkit.getWorld("world_nether"), netherRadius);
+			enabledWorlds.add("world_nether");
+		}
+
+		if (PluginSettings.world_the_end_auto_run() && Bukkit.getWorld("world_the_end") != null && Bukkit.getOnlinePlayers().isEmpty()) {
+			int endPrintTime = parseTime(PluginSettings.world_the_end_print_update_delay());
+			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world_the_end"));
+			long endRadius = parseRadius(PluginSettings.world_the_end_radius());
+			preGenerator.enable(coresPerTaskMap.get("world_the_end"), timeUnit, timeValue, endPrintTime, Bukkit.getWorld("world_the_end"), endRadius);
+			enabledWorlds.add("world_the_end");
+		}
 	}
 
 	public long calculateChunksInBorder(World world) {

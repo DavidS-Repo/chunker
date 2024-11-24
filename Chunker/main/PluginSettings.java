@@ -61,14 +61,14 @@ public class PluginSettings {
 
 		// Nether
 		config.addDefault("world_nether.auto_run", false);
-		config.addDefault("world_nether.task_queue_timer", 30);
+		config.addDefault("world_nether.task_queue_timer", 60);
 		config.addDefault("world_nether.parallel_tasks_multiplier", "auto");
 		config.addDefault("world_nether.print_update_delay", "5s");
 		config.addDefault("world_nether.radius", "default");
 
 		// End
 		config.addDefault("world_the_end.auto_run", false);
-		config.addDefault("world_the_end.task_queue_timer", 15);
+		config.addDefault("world_the_end.task_queue_timer", 60);
 		config.addDefault("world_the_end.parallel_tasks_multiplier", "auto");
 		config.addDefault("world_the_end.print_update_delay", "5s");
 		config.addDefault("world_the_end.radius", "default");
@@ -102,8 +102,8 @@ public class PluginSettings {
 		return config.getBoolean("world.auto_run");
 	}
 
-	public static int world_task_queue_timer() {
-		return config.getInt("world.task_queue_timer");
+	public static long world_task_queue_timer() {
+		return config.getLong("world.task_queue_timer");
 	}
 
 	public static String world_parallel_tasks_multiplier() {
@@ -123,8 +123,8 @@ public class PluginSettings {
 		return config.getBoolean("world_nether.auto_run");
 	}
 
-	public static int world_nether_task_queue_timer() {
-		return config.getInt("world_nether.task_queue_timer");
+	public static long world_nether_task_queue_timer() {
+		return config.getLong("world_nether.task_queue_timer");
 	}
 
 	public static String world_nether_parallel_tasks_multiplier() {
@@ -144,8 +144,8 @@ public class PluginSettings {
 		return config.getBoolean("world_the_end.auto_run");
 	}
 
-	public static int world_the_end_task_queue_timer() {
-		return config.getInt("world_the_end.task_queue_timer");
+	public static long world_the_end_task_queue_timer() {
+		return config.getLong("world_the_end.task_queue_timer");
 	}
 
 	public static String world_the_end_parallel_tasks_multiplier() {

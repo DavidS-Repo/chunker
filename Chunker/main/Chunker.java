@@ -6,10 +6,19 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class Chunker extends JavaPlugin implements Listener {
 	private PluginSettings settings;
 
-	@Override public void onEnable() {
+	@Override
+	public void onEnable() {
 		getServer().getPluginManager().registerEvents(this, this);
 		settings = new PluginSettings(this);
-		PreGenerator preGenerator = new PreGenerator(this);
+		PreGenerator preGenerator;
+		try {
+			preGenerator = new PreGenerator(this);
+		} catch (RuntimeException e) {
+			e.printStackTrace();
+			getLogger().severe("Failed to initialize PreGenerator: " + e.getMessage());
+			getServer().getPluginManager().disablePlugin(this);
+			return;
+		}
 		getServer().getPluginManager().registerEvents(preGenerator, this);
 		PreGeneratorCommands preGeneratorCommands = new PreGeneratorCommands(preGenerator, settings);
 		getCommand("pregen").setExecutor(preGeneratorCommands);
