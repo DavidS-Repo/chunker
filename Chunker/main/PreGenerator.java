@@ -31,7 +31,6 @@ public class PreGenerator implements Listener {
 
 	private final JavaPlugin plugin;
 	private final ConcurrentHashMap<Integer, PreGenerationTask> tasks = new ConcurrentHashMap<>();
-	private Queue<Long> chunkKeys = new ConcurrentLinkedQueue<>();
 
 	private static final String
 	ENABLED_WARNING_MESSAGE = "pre-generator is already enabled.",
@@ -75,7 +74,6 @@ public class PreGenerator implements Listener {
 		task.radius = radius;
 		task.enabled = true;
 		task.worldId = worldId;
-		task.batchSize = PluginSettings.THREADS();
 
 		if (world.getEnvironment() == Environment.NORMAL) {
 			task_queue_timer = PluginSettings.world_task_queue_timer();
@@ -253,36 +251,39 @@ public class PreGenerator implements Listener {
 		if (!task.enabled) {
 			return;
 		}
+
 		task.taskSubmit.scheduleAtFixedRate(() -> {
-			if (!task.enabled) {
+			if (!task.enabled || task.totalChunksProcessed.sum() >= task.radius) {
+				saveTaskState(task);
 				return;
 			}
-			for (int i = 0; i < task.batchSize; i++) {
-				if (task.totalChunksProcessed.sum() >= task.radius) {
-					break;
-				}
-				long chunkKey = task.chunkIterator.getNextChunkCoordinates();
-				if (chunkKey == -1) {
-					saveTaskState(task);
-					break;
-				}
-				chunkKeys.add(chunkKey);
-			}
-			if (chunkKeys.isEmpty()) {
+			long nextChunkKey = task.chunkIterator.getNextChunkCoordinates();
+			if (nextChunkKey == -1) {
+				saveTaskState(task);
 				return;
 			}
-			task.taskDo.execute(() -> {
-				while (!chunkKeys.isEmpty()) {
-					Long chunkKey = chunkKeys.poll();
-					if (chunkKey == null || !task.enabled) {
-						break;
-					}
-					ChunkData cData = new ChunkData(chunkKey);
-					processChunk(task, cData);
-				}
-				completionCheck(task);
-			});
-		}, 0, (task_queue_timer * task.batchSize), TimeUnit.MILLISECONDS);
+			task.taskDo.execute(() -> processChunks(task, nextChunkKey));
+		}, 0, task_queue_timer, TimeUnit.MILLISECONDS);
+	}
+
+	/**
+	 * Processes a batch of chunks asynchronously.
+	 *
+	 * @param task        The task to process chunks for.
+	 * @param initialChunkKey The initial chunk key to start processing from.
+	 */
+	private void processChunks(PreGenerationTask task, long initialChunkKey) {
+		Queue<Long> chunkKeys = new ConcurrentLinkedQueue<>();
+		chunkKeys.add(initialChunkKey);
+		while (!chunkKeys.isEmpty() && task.enabled) {
+			Long currentChunkKey = chunkKeys.poll();
+			if (currentChunkKey == null) {
+				break;
+			}
+			ChunkData chunkData = new ChunkData(currentChunkKey);
+			processChunk(task, chunkData);
+		}
+		completionCheck(task);
 	}
 
 	/**

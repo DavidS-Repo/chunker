@@ -60,11 +60,6 @@ public class PreGenerationTask {
 	public int tasks;
 
 	/** 
-	 * Number of chunks processed in each batch.
-	 */
-	public int batchSize;
-
-	/** 
 	 * Unit of time used for scheduling (e.g., seconds, minutes).
 	 */
 	public char timeUnit;
