@@ -7,68 +7,11 @@ Spigot, Bukkit, Paper, Pufferfish, Purpur
 
 
 # Overview
-Chunker is designed to be more efficient and resilient compared to traditional pre-generators. Traditional pre-generators often keep track of hundreds of thousands of chunks in memory, leading to significant issues in the event of a crash. Chunker's approach minimizes the amount of data tracked, reducing the impact of crashes and improving overall performance.
+Chunker is designed to be more efficient and resilient compared to traditional pre-generators. Traditional pre-generators often keep track of thousands of chunks in memory, leading to significant issues in the event of a crash. Chunker's approach minimizes the amount of data tracked, reducing the impact of crashes and improving overall performance.
 
 It works best on Paper forks, where it utilizes asynchronous functionality for faster performance. Performance for Bukkit/Spigot has been more optimized than the default PaperLib implementation, so it should be about 2-3x faster for those compared to other pre-generators.
 
-The pre-generation can be set to run by default when there are no players on the server, and it will shut down when any players connect. This option can be changed in the `settings.yml`. You can also modify the load each world will put on the server and distribute the load however you would like. For example, if you just want to pre-generate the overworld, you can enable `auto_run` in the `world` and set `parallel_tasks_multiplier` to your thread count to utilize 100% CPU load. You can also customize the `task_queue_timer`, `parallel_tasks_multiplier`, `print_update_delay`, and `radius` in the `settings.yml` individually per world.
-
-> **_NOTE:_** This plugin will not support older versions because it uses features available only in Java 21 ([Virtual Threads](https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html)). However, I plan to support future versions and improve performance further if possible.
-
-## Key Differences
-
-### 1. Reduced Memory Usage
-Other pre-generators maintain a large in-memory database of chunks, which can grow to hundreds of thousands. This leads to high memory consumption and an increased risk of losing hours of progress during a crash. Chunker limits the amount of data tracked, only keeping necessary information in memory.
-
-### 2. Minimal Data Loss
-In case of a crash, traditional pre-generators can lose a significant amount of progress due to the extensive data they manage. Chunker is designed to handle crashes more gracefully. At most, it will lose the chunk it was processing at the time of the crash.
-
-### 3. Efficient Chunk Processing
-Chunker ensures that already processed chunks are not redone. This is achieved through a strategic method of determining the next chunk for generation. If a chunk is reloaded, it is instantly unloaded, avoiding redundant processing and saving resources.
-
-### 4. Parallel Task Management
-Chunker utilizes an efficient parallel task management system, leveraging the available CPU cores optimally. The load on the server scales linearly with `parallelTasksMultiplier`. If you want a lighter load, you can set a smaller `parallelTasksMultiplier`.
-
-## How It Works
-
-### Starting Point for Generation
-Chunker begins pre-generation at chunk (x = 0, z = 0) and then expands outwards in a spiral pattern. This ensures that chunks near the spawn point are generated first, gradually moving outward.
-
-### Determining the Next Chunk
-The next chunk is determined using a spiral traversal algorithm. The direction of traversal changes dynamically based on the position, ensuring efficient coverage of the world. Here’s how it works:
-
-1. **Initial Direction and Position**: Start at (x = 0, z = 0) with an initial direction.
-2. **Direction Changes**: Change direction based on the current position. If `x == z` or `(x < 0 && x == -z)` or `(x > 0 && x == 1 - z)`, the direction changes. This ensures a spiral pattern.
-3. **Update Position**: Update `x` and `z` based on the current direction. Continue this until a chunk at a coordinate (both `x` and `z`) is found for processing.
-
-### Tracking Progress and Saving Data
-Chunker keeps track of the following numbers to ensure minimal memory usage and efficient recovery in case of a crash:
-
-1. **Current Coordinates (x, z)**: The current coordinates being processed.
-2. **Direction (dx, dz)**: The current direction of traversal.
-3. **Total Chunks Processed**: The total number of chunks processed so far.
-4. **Chunks Processed in the Current Cycle**: The number of chunks processed in the current cycle (resets every print cycle).
-
-These numbers are periodically saved to a file after each chunk is processed to ensure that progress can be resumed in case of a crash. The file contains:
-
-1. **x, z Coordinates**: The current coordinates.
-2. **dx, dz Directions**: The current directions.
-3. **Total Chunks Processed**: To track overall progress.
-
-#### Example Saved Data Format
-`world_pregenerator.txt`
-```
--96_-222_1_0
-99039
-```
-- x: -96, z: -222, dx: 1, dz: 0
-- totalChunksProcessed: 99039
-
-### Reasons for These Choices
-- By only tracking essential data, Chunker minimizes memory usage.
-- Periodically saving progress ensures minimal data loss in case of a crash.
-- The spiral pattern ensures that chunks are processed in an orderly fashion, avoiding redundant processing and unnecessary checks and verifications.
-- Changing directions based on the position ensures thorough and efficient coverage of the world.
+The pre-generation can be set to run by default when there are no players on the server, and it will shut down when any players connect. This option can be changed in the `settings.yml`. You can also modify the load each world will put on the server and distribute the load however you would like.
 
 ---
 
@@ -113,29 +56,29 @@ chunk-system:
 
 ## Command Settings
 ### `ParallelTasksMultiplier`
-- **Recommendation:** Stay below your thread count (can be exceeded if desired, but exceeding your thread count will cause a chunk backlog, and the `Total time` won’t reflect accurately).
-- **Function:** Limits the number of parallel chunk load tasks.
+- Stay below your thread count (can be exceeded if desired, but exceeding your thread count will cause a chunk backlog and the `Total time` won’t reflect accurately unless `task_queue_timer` is also modified).
+- Limits the number of parallel chunk load tasks.
 
 ### Performance Examples:
 - **ParallelTasksMultiplier = 6:**
-  - **Command:** `/pregen 6 5s world 100c`
-  - **Chunks per second:** Avg. ~100 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
-  - **Time:** Finished in 1 Minute 39 Seconds
+  - `/pregen 6 5s world 100c`
+  - Avg. ~100 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
+  - Finished in 1 Minute 39 Seconds
 
 ![ParallelTasksMultiplier = 6](https://www.toolsnexus.com/mc/8_11_2024_pregen_6_5s_world_100c.png)
 
 - **ParallelTasksMultiplier = 12:**
-  - **Command:** `/pregen 12 5s world 100c`
-  - **Chunks per second:** Avg. ~200 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
-  - **Time:** Finished in 49 Seconds
+  - `/pregen 12 5s world 100c`
+  - Avg. ~200 ± 4 (on a 5600x CPU, depending on server activity and other system tasks)
+  - Finished in 49 Seconds
 
 ![ParallelTasksMultiplier = 12](https://www.toolsnexus.com/mc/8_11_2024_pregen_12_5s_world_100c.png)
 
 #### Summary:
-- **Load Management:** Determines the load on your server. Scales linearly ~ 17-18 chunks per `ParallelTasksMultiplier`.
-- **Small Number:** Lower load, fewer chunks per second. Good if you just want to run it in the background.
-- **Large Number:** Higher load, faster chunk processing.
-- **Best Practice:** Start at 1 and increase by 1 until you encounter constant overload or reach your thread count.
+- Determines the load on your server. Scales depending on `task_queue_timer` in the settings.
+- Lower load, fewer chunks per second. Good if you just want to run it in the background.
+- Higher load, faster chunk processing.
+- Start at 1 and increase by 1 until you encounter constant overload or reach your thread count.
 
 ## `World`
 - Determines which world you want to pre-generate.
