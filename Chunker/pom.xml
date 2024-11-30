@@ -45,6 +45,8 @@
 				<configuration>
 					<source>21</source>
 					<target>21</target>
+					<encoding>UTF-8</encoding>
+					<proc>none</proc>
 				</configuration>
 			</plugin>
 			<plugin>

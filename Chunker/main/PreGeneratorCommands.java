@@ -17,6 +17,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static main.ConsoleColorUtils.*;
+
+/**
+ * Handles commands related to chunk pre-generation.
+ */
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private final PreGenerator preGenerator;
 	private long worldBorder;
@@ -26,9 +31,15 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private static final int tickSecond = 20, tickMinute = 1200, tickHour = 72000;
 	private final Set<String> enabledWorlds = new HashSet<>();
 	private static final String
-	WARNING_MESSAGE = "Invalid numbers provided.", 
+	WARNING_MESSAGE = "Invalid numbers provided.",
 	USAGE_MESSAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>";
 
+	/**
+	 * Constructs a PreGeneratorCommands instance.
+	 *
+	 * @param preGenerator the PreGenerator instance
+	 * @param settings     the plugin settings
+	 */
 	public PreGeneratorCommands(PreGenerator preGenerator, PluginSettings settings) {
 		this.preGenerator = preGenerator;
 	}
@@ -40,7 +51,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				handlePreGenCommand(sender, args);
 				return true;
 			} else {
-				cC.sendS(sender, cC.RED, USAGE_MESSAGE);
+				colorMessage(sender, RED, USAGE_MESSAGE);
 				return true;
 			}
 		} else if (label.equalsIgnoreCase("pregenoff")) {
@@ -50,13 +61,19 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		return false;
 	}
 
+	/**
+	 * Handles the "/pregen" command to start pre-generation.
+	 *
+	 * @param sender the command sender
+	 * @param args   command arguments
+	 */
 	private void handlePreGenCommand(CommandSender sender, String[] args) {
 		try {
 			int parallelTasksMultiplier = Integer.parseInt(args[0]);
 			String printTimeArg = args[1];
 			int printTime = parseTime(printTimeArg);
 			if (printTime < 0) {
-				cC.sendS(sender, cC.RED, WARNING_MESSAGE);
+				colorMessage(sender, RED, WARNING_MESSAGE);
 				return;
 			}
 			String worldName = args[2];
@@ -68,16 +85,22 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			}
 			long radius = parseRadius(args[3]);
 			if (radius < 0) {
-				cC.sendS(sender, cC.RED, WARNING_MESSAGE);
+				colorMessage(sender, RED, WARNING_MESSAGE);
 				return;
 			}
 			preGenerator.enable(parallelTasksMultiplier, timeUnit, timeValue, printTime, world, radius);
 			enabledWorlds.add(worldName);
 		} catch (NumberFormatException e) {
-			cC.sendS(sender, cC.RED, WARNING_MESSAGE);
+			colorMessage(sender, RED, WARNING_MESSAGE);
 		}
 	}
 
+	/**
+	 * Handles the "/pregenoff" command to stop pre-generation.
+	 *
+	 * @param sender the command sender
+	 * @param args   command arguments
+	 */
 	public void handlePreGenOffCommand(CommandSender sender, String[] args) {
 		if (args.length == 0) {
 			for (String worldName : enabledWorlds) {
@@ -88,16 +111,22 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			String worldName = args[0];
 			World world = Bukkit.getWorld(worldName);
 			if (world == null) {
-				cC.sendS(sender, cC.RED, "World not found: " + worldName);
+				colorMessage(sender, RED, "World not found: " + worldName);
 				return;
 			}
 			preGenerator.disable(world);
 			enabledWorlds.remove(worldName);
 		} else {
-			cC.sendS(sender, cC.RED, "Usage: /pregenoff [world]");
+			colorMessage(sender, RED, "Usage: /pregenoff [world]");
 		}
 	}
 
+	/**
+	 * Parses time input from command arguments.
+	 *
+	 * @param timeArg the time argument string
+	 * @return the time in ticks
+	 */
 	private int parseTime(String timeArg) {
 		try {
 			timeValue = Integer.parseInt(timeArg.substring(0, timeArg.length() - 1));
@@ -117,6 +146,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 	}
 
+	/**
+	 * Parses radius input from command arguments.
+	 *
+	 * @param radiusArg the radius argument string
+	 * @return the radius in chunks
+	 */
 	private long parseRadius(String radiusArg) {
 		try {
 			if (radiusArg.equalsIgnoreCase("default")) {
@@ -139,17 +174,18 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 	}
 
+	/**
+	 * Checks and runs auto pre-generators based on plugin settings.
+	 */
 	public void checkAndRunAutoPreGenerators() {
 		int totalCores = PluginSettings.THREADS();
 		int autoRunCount = 0;
 		Map<String, Integer> coresPerTaskMap = new HashMap<>();
 
-		// Retrieve parallel tasks multiplier values
 		String worldMultiplier = PluginSettings.world_parallel_tasks_multiplier();
 		String netherMultiplier = PluginSettings.world_nether_parallel_tasks_multiplier();
 		String endMultiplier = PluginSettings.world_the_end_parallel_tasks_multiplier();
 
-		// Pre-calculate fixed core assignments for worlds with explicit numbers
 		if (PluginSettings.world_auto_run()) {
 			if (!"auto".equalsIgnoreCase(worldMultiplier)) {
 				coresPerTaskMap.put("world", Integer.parseInt(worldMultiplier));
@@ -177,7 +213,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			}
 		}
 
-		// Distribute remaining cores equally for auto worlds
 		int coresPerTaskForAuto = autoRunCount > 0 ? totalCores / autoRunCount : 0;
 
 		if (PluginSettings.world_auto_run() && "auto".equalsIgnoreCase(worldMultiplier)) {
@@ -190,10 +225,8 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			coresPerTaskMap.put("world_the_end", coresPerTaskForAuto);
 		}
 
-		// Exit if no worlds to process
 		if (coresPerTaskMap.isEmpty()) return;
 
-		// Process worlds based on calculated core assignments
 		if (PluginSettings.world_auto_run() && Bukkit.getWorld("world") != null && Bukkit.getOnlinePlayers().isEmpty()) {
 			int worldPrintTime = parseTime(PluginSettings.world_print_update_delay());
 			worldBorder = calculateChunksInBorder(Bukkit.getWorld("world"));
@@ -219,6 +252,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 	}
 
+	/**
+	 * Calculates the total number of chunks within the world's border.
+	 *
+	 * @param world the world to calculate for
+	 * @return the total number of chunks
+	 */
 	public long calculateChunksInBorder(World world) {
 		WorldBorder worldBorder = world.getWorldBorder();
 		double diameter = worldBorder.getSize();
@@ -248,6 +287,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		return null;
 	}
 
+	/**
+	 * Registers the pre-generator commands with the plugin.
+	 *
+	 * @param plugin       the JavaPlugin instance
+	 * @param preGenerator the PreGenerator instance
+	 */
 	public static void registerCommands(JavaPlugin plugin, PreGenerator preGenerator) {
 		PreGeneratorCommands commands = new PreGeneratorCommands(preGenerator, new PluginSettings(plugin));
 		plugin.getCommand("pregen").setExecutor(commands);
