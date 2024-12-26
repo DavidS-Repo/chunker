@@ -78,15 +78,16 @@ public class PreGenerator implements Listener {
 		synchronized (tasks) {
 			tasks.put(worldId, task);
 		}
-
+		task.timerStart = System.currentTimeMillis();
 		load.state(plugin, task);
+		initializeSchedulers(task);
 
 		if (task.totalChunksProcessed.sum() >= radius) {
 			logColor(YELLOW, world.getName() + " " + RADIUS_EXCEEDED_MESSAGE);
-			task.enabled = false;
+			terminate(task);
 			return;
 		}
-		initializeSchedulers(task);
+
 		startGeneration(task);
 		print.start(task);
 	}
@@ -107,8 +108,13 @@ public class PreGenerator implements Listener {
 		PreGenerationTask task;
 		synchronized (tasks) {
 			task = tasks.get(worldId);
-			if (task == null || !task.enabled) {
+			if (task == null) {
 				logColor(YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
+				return;
+			}
+			if (!task.enabled) {
+				logColor(YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
+				tasks.remove(worldId);
 				return;
 			}
 			tasks.remove(worldId);
@@ -124,19 +130,17 @@ public class PreGenerator implements Listener {
 		task.timerEnd = System.currentTimeMillis();
 		try {
 			save.state(plugin, task);
-		} catch (Exception e) {
-			exceptionMsg("Exception during saveTaskState: " + e.getMessage());
-			e.printStackTrace();
-		}
-		try {
 			print.info(task);
 		} catch (Exception e) {
-			exceptionMsg("Exception during printInfo: " + e.getMessage());
+			exceptionMsg("Exception during saveTaskState or printInfo: " + e.getMessage());
 			e.printStackTrace();
 		}
 		print.stop(task);
 		shutdownSchedulers(task);
 		task.enabled = false;
+		synchronized (tasks) {
+			tasks.remove(task.worldId);
+		}
 	}
 
 	/**
@@ -158,7 +162,6 @@ public class PreGenerator implements Listener {
 	 * Starts the chunk generation process based on whether the server is running PaperMC.
 	 */
 	private void startGeneration(PreGenerationTask task) {
-		task.timerStart = System.currentTimeMillis();
 		if (IS_PAPER) {
 			for (int i = 0; i < task.parallelTasksMultiplier; i++) {
 				asyncProcess(task);

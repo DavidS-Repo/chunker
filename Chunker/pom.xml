@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>Chunker</groupId>
 	<artifactId>Chunker</artifactId>
-	<version>1.21.3</version>
+	<version>1.21.4</version>
 	<name>Chunker</name>
 	<description>Fast and Efficient Async Minecraft World Pre-generator</description>
 	<repositories>
@@ -22,7 +22,7 @@
 		<dependency>
 			<groupId>io.papermc.paper</groupId>
 			<artifactId>paper-api</artifactId>
-			<version>1.21.3-R0.1-SNAPSHOT</version>
+			<version>1.21.4-R0.1-SNAPSHOT</version>
 			<scope>provided</scope>
 		</dependency>
 	</dependencies>
