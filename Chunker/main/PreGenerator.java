@@ -11,7 +11,9 @@ import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static main.ConsoleColorUtils.*;
 
@@ -27,10 +29,9 @@ public class PreGenerator implements Listener {
 	private final Save save;
 	private final ConcurrentHashMap<Integer, PreGenerationTask> tasks = new ConcurrentHashMap<>();
 
-	private static final String
-	ENABLED_WARNING_MESSAGE = "pre-generator is already enabled.",
-	DISABLED_WARNING_MESSAGE = "pre-generator is already disabled.",
-	RADIUS_EXCEEDED_MESSAGE = "radius reached. To process more chunks, please increase the radius.";
+	private static final String ENABLED_WARNING_MESSAGE = "pre-generator is already enabled.";
+	private static final String DISABLED_WARNING_MESSAGE = "pre-generator is already disabled.";
+	private static final String RADIUS_EXCEEDED_MESSAGE = "radius reached. To process more chunks, please increase the radius.";
 
 	private static final boolean IS_PAPER = detectPaper();
 	private long task_queue_timer;
@@ -56,7 +57,6 @@ public class PreGenerator implements Listener {
 				return;
 			}
 		}
-
 		PreGenerationTask task = new PreGenerationTask();
 		task.parallelTasksMultiplier = parallelTasksMultiplier;
 		task.timeUnit = timeUnit;
@@ -163,9 +163,45 @@ public class PreGenerator implements Listener {
 	 */
 	private void startGeneration(PreGenerationTask task) {
 		if (IS_PAPER) {
-			for (int i = 0; i < task.parallelTasksMultiplier; i++) {
-				asyncProcess(task);
-			}
+			task.taskSubmitScheduler.scheduleAtFixedRate(
+					() -> {
+						try {
+							if (!task.enabled) {
+								return;
+							}
+							for (int i = 0; i < task.parallelTasksMultiplier; i++) {
+								if (task.totalChunksProcessed.sum() >= task.radius) {
+									saveTaskState(task);
+									return;
+								}
+								RegionChunkIterator.NextChunkResult nextChunkResult = task.chunkIterator.getNextChunkCoordinates();
+								if (nextChunkResult == null) {
+									saveTaskState(task);
+									return;
+								}
+								if (nextChunkResult.regionCompleted) {
+									saveTaskState(task);
+								}
+								ChunkPos nextChunkPos = nextChunkResult.chunkPos;
+								CompletableFuture.runAsync(() -> {
+									try {
+										processChunk(task, nextChunkPos);
+									} catch (Exception e) {
+										exceptionMsg("Exception in processChunk: " + e.getMessage());
+										e.printStackTrace();
+									}
+								}).exceptionally(ex -> {
+									exceptionMsg("Exception in CompletableFuture in chunk generation: " + ex.getMessage());
+									ex.printStackTrace();
+									return null;
+								});
+							}
+						} catch (Exception e) {
+							exceptionMsg("Exception in repeated chunk generation: " + e.getMessage());
+							e.printStackTrace();
+						}
+					},
+					0, task_queue_timer, TimeUnit.MILLISECONDS, task.taskSubmitScheduler.isEnabledSupplier());
 		} else {
 			new BukkitRunnable() {
 				@Override
@@ -176,65 +212,6 @@ public class PreGenerator implements Listener {
 					}
 				}
 			}.runTaskTimer(plugin, 0L, 0L);
-		}
-	}
-
-	/**
-	 * Asynchronously processes chunk loading tasks using batch processing.
-	 */
-	private void asyncProcess(PreGenerationTask task) {
-		if (!task.enabled) {
-			return;
-		}
-		task.taskSubmitScheduler.scheduleAtFixedRate(() -> {
-			try {
-				if (!task.enabled || task.totalChunksProcessed.sum() >= task.radius) {
-					saveTaskState(task);
-					return;
-				}
-				RegionChunkIterator.NextChunkResult nextChunkResult = task.chunkIterator.getNextChunkCoordinates();
-				if (nextChunkResult == null) {
-					saveTaskState(task);
-					return;
-				}
-				if (nextChunkResult.regionCompleted) {
-					saveTaskState(task);
-				}
-				ChunkPos nextChunkPos = nextChunkResult.chunkPos;
-				CompletableFuture.runAsync(() -> {
-					try {
-						processChunk(task, nextChunkPos);
-					} catch (Exception e) {
-						exceptionMsg("Exception in processChunk: " + e.getMessage());
-						e.printStackTrace();
-					}
-				}).exceptionally(ex -> {
-					exceptionMsg("Exception in CompletableFuture in asyncProcess: " + ex.getMessage());
-					ex.printStackTrace();
-					return null;
-				});
-			} catch (Exception e) {
-				exceptionMsg("Exception in taskSubmit scheduled task: " + e.getMessage());
-				e.printStackTrace();
-			}
-		}, 0, task_queue_timer, TimeUnit.MILLISECONDS, task.taskSubmitScheduler.isEnabledSupplier());
-	}
-
-	/**
-	 * Asynchronously retrieves a chunk using the world's async method and unloads it after loading.
-	 */
-	private void processChunk(PreGenerationTask task, ChunkPos chunkPos) {
-		try {
-			if (!task.enabled) {
-				return;
-			}
-			getChunkAsync(task, chunkPos, true);
-			task.totalChunksProcessed.increment();
-			task.chunksThisCycle++;
-			completionCheck(task);
-		} catch (Exception e) {
-			exceptionMsg("Exception in processChunk: " + e.getMessage());
-			e.printStackTrace();
 		}
 	}
 
@@ -271,6 +248,24 @@ public class PreGenerator implements Listener {
 	 */
 	private void saveTaskState(PreGenerationTask task) {
 		save.state(plugin, task);
+	}
+
+	/**
+	 * Asynchronously retrieves a chunk using the world's async method and unloads it after loading.
+	 */
+	private void processChunk(PreGenerationTask task, ChunkPos chunkPos) {
+		try {
+			if (!task.enabled) {
+				return;
+			}
+			getChunkAsync(task, chunkPos, true);
+			task.totalChunksProcessed.increment();
+			task.chunksThisCycle++;
+			completionCheck(task);
+		} catch (Exception e) {
+			exceptionMsg("Exception in processChunk: " + e.getMessage());
+			e.printStackTrace();
+		}
 	}
 
 	/**
