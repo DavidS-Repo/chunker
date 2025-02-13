@@ -1,11 +1,5 @@
 # Chunker
 
-<div style="display: flex; justify-content: space-between; width: 100%;">
-    <img src="https://www.toolsnexus.com/mc/chunker1.png" style="width: 49%; height: auto;">
-    <img src="https://www.toolsnexus.com/mc/chunker2.png" style="width: 49%; height: auto;">
-</div>
-
-
 #### Supported MC Versions:
 - Minecraft 1.20.5+  
 - **Requires Java 21 or higher**
@@ -14,6 +8,10 @@
 - Spigot, Bukkit, Paper, Pufferfish, Purpur
 
 ---
+<div style="display: flex; justify-content: space-between; width: 100%;">
+    <img src="https://www.toolsnexus.com/mc/chunker1.png" style="width: 49%; height: auto;">
+    <img src="https://www.toolsnexus.com/mc/chunker2.png" style="width: 49%; height: auto;">
+</div>
 
 ## Overview
 Chunker is designed to be more efficient and resilient than traditional pre-generators. Many pre-generators track thousands of chunks in memory, risking significant rollback or data loss if the server crashes. Chunker, by contrast, only tracks minimal state (like the current region’s position and how many chunks are completed), so crashes have less impact on the generation process.
