@@ -1,54 +1,129 @@
 package main;
 
-import java.util.concurrent.atomic.AtomicReference;
-
 /**
  * Facilitates traversal of chunks within regions using a spiral pattern.
+ * This mutable, synchronized implementation now preserves the original spiral behavior.
  */
 public final class RegionChunkIterator {
-
 	private static final int REGION_SIZE = 32;
 	private static final int DIRECTIONS_COUNT = 4;
 	private static final int[] DX = {1, 0, -1, 0}; // East, North, West, South
 	private static final int[] DZ = {0, 1, 0, -1};
 
-	private final AtomicReference<State> stateRef = new AtomicReference<>(new State());
+	// Mutable state variables
+	private int currentRegionX = 0;
+	private int currentRegionZ = 0;
+	private int directionIndex = 0;
+	private int stepsRemaining = 1;
+	private int stepsToChange = 1;
+	private int chunkX = 0;
+	private int chunkZ = 0;
 
 	/**
-	 * Retrieves the next chunk coordinates within the current region.
+	 * Retrieves the next chunk coordinates in the spiral order.
+	 * When a region’s chunks are fully iterated, it moves to the next region.
 	 *
-	 * @return the next chunk coordinates and whether a new region has been started
+	 * @return the next chunk’s global coordinates along with a flag indicating a new region.
 	 */
-	public NextChunkResult getNextChunkCoordinates() {
-		while (true) {
-			State oldState = stateRef.get();
-			if (oldState.isTraversalComplete()) {
+	public synchronized NextChunkResult getNextChunkCoordinates() {
+		// Check if the current region's chunks have been fully iterated.
+		if (isRegionComplete()) {
+			moveToNextRegion();
+			// Reset the chunk iteration for the new region.
+			chunkX = 0;
+			chunkZ = 0;
+			if (isTraversalComplete()) {
 				return null;
 			}
-			State newState;
-			boolean regionCompleted = false;
-			if (oldState.isRegionComplete()) {
-				regionCompleted = true;
-				newState = oldState.prepareNextRegion();
-				if (newState.isTraversalComplete()) {
-					return null;
-				}
-			} else {
-				newState = oldState.advanceChunk();
-			}
-			if (stateRef.compareAndSet(oldState, newState)) {
-				int globalChunkX = (oldState.currentRegionX << 5) + oldState.chunkX;
-				int globalChunkZ = (oldState.currentRegionZ << 5) + oldState.chunkZ;
-				return new NextChunkResult(new ChunkPos(globalChunkX, globalChunkZ), regionCompleted);
-			}
+			return new NextChunkResult(ChunkPos.get(globalX(), globalZ()), true);
 		}
+		// Return the current global chunk position, then advance the internal chunk iteration.
+		NextChunkResult result = new NextChunkResult(ChunkPos.get(globalX(), globalZ()), false);
+		advanceChunk();
+		return result;
+	}
+
+	/**
+	 * Determines if the current region's chunk iteration is complete.
+	 * In this implementation, we consider the region complete when both chunkX and chunkZ
+	 * have reached (or exceeded) REGION_SIZE.
+	 *
+	 * @return true if all chunks in the region have been iterated.
+	 */
+	private boolean isRegionComplete() {
+		return chunkX >= REGION_SIZE && chunkZ >= REGION_SIZE;
+	}
+
+	/**
+	 * Advances the chunk coordinates within the current region.
+	 * When the end of a row is reached, resets chunkZ and increments chunkX.
+	 * When chunkX reaches REGION_SIZE, forces both coordinates to REGION_SIZE to signal completion.
+	 */
+	private void advanceChunk() {
+		chunkZ++;
+		if (chunkZ >= REGION_SIZE) {
+			chunkZ = 0;
+			chunkX++;
+		}
+		if (chunkX >= REGION_SIZE) {
+			// Force region complete state.
+			chunkX = REGION_SIZE;
+			chunkZ = REGION_SIZE;
+		}
+	}
+
+	/**
+	 * Advances the iterator to the next region using a spiral pattern.
+	 * This logic is equivalent to the original immutable state's prepareNextRegion() method.
+	 */
+	private void moveToNextRegion() {
+		if (stepsRemaining == 0) {
+			directionIndex = (directionIndex + 1) & (DIRECTIONS_COUNT - 1);
+			if ((directionIndex & 1) == 0) {
+				stepsToChange++;
+			}
+			stepsRemaining = stepsToChange;
+		}
+		currentRegionX += DX[directionIndex];
+		currentRegionZ += DZ[directionIndex];
+		stepsRemaining--;
+	}
+
+	/**
+	 * Determines if the overall traversal is complete.
+	 * (You can define a termination condition here if needed.)
+	 *
+	 * @return false as a default.
+	 */
+	private boolean isTraversalComplete() {
+		return false;
+	}
+
+	/**
+	 * Computes the global x-coordinate.
+	 */
+	private int globalX() {
+		return (currentRegionX << 5) + chunkX;
+	}
+
+	/**
+	 * Computes the global z-coordinate.
+	 */
+	private int globalZ() {
+		return (currentRegionZ << 5) + chunkZ;
 	}
 
 	/**
 	 * Resets the iterator to its initial state.
 	 */
-	public void reset() {
-		stateRef.set(new State());
+	public synchronized void reset() {
+		currentRegionX = 0;
+		currentRegionZ = 0;
+		directionIndex = 0;
+		stepsRemaining = 1;
+		stepsToChange = 1;
+		chunkX = 0;
+		chunkZ = 0;
 	}
 
 	/**
@@ -59,108 +134,43 @@ public final class RegionChunkIterator {
 	 * @param directionIndex the current direction index
 	 * @param stepsRemaining the steps remaining in the current direction
 	 * @param stepsToChange  the number of steps before changing direction
-	 * @param chunkIndex     the chunk index within the region
+	 * @param chunkIndex     the chunk index within the region (encoded as (chunkX << 5) | chunkZ)
 	 */
-	public void setState(int currentRegionX, int currentRegionZ, int directionIndex, int stepsRemaining, int stepsToChange, int chunkIndex) {
-		int chunkX = chunkIndex >> 5;
-				int chunkZ = chunkIndex & 31;
-				stateRef.set(new State(currentRegionX, currentRegionZ, directionIndex, stepsRemaining, stepsToChange, chunkX, chunkZ));
+	public synchronized void setState(int currentRegionX, int currentRegionZ, int directionIndex, int stepsRemaining, int stepsToChange, int chunkIndex) {
+		this.currentRegionX = currentRegionX;
+		this.currentRegionZ = currentRegionZ;
+		this.directionIndex = directionIndex;
+		this.stepsRemaining = stepsRemaining;
+		this.stepsToChange = stepsToChange;
+		this.chunkX = chunkIndex >> 5;
+		this.chunkZ = chunkIndex & 31;
 	}
 
-	public int getCurrentRegionX() {
-		return stateRef.get().currentRegionX;
+	public synchronized int getCurrentRegionX() {
+		return currentRegionX;
 	}
 
-	public int getCurrentRegionZ() {
-		return stateRef.get().currentRegionZ;
+	public synchronized int getCurrentRegionZ() {
+		return currentRegionZ;
 	}
 
-	public int getDirectionIndex() {
-		return stateRef.get().directionIndex;
+	public synchronized int getDirectionIndex() {
+		return directionIndex;
 	}
 
-	public int getStepsRemaining() {
-		return stateRef.get().stepsRemaining;
+	public synchronized int getStepsRemaining() {
+		return stepsRemaining;
 	}
 
-	public int getStepsToChange() {
-		return stateRef.get().stepsToChange;
-	}
-
-	public int getChunkIndex() {
-		State state = stateRef.get();
-		return (state.chunkX << 5) | state.chunkZ;
+	public synchronized int getStepsToChange() {
+		return stepsToChange;
 	}
 
 	/**
-	 * Immutable class representing the iterator's traversal state.
+	 * Returns the current chunk index within the region (encoded as (chunkX << 5) | chunkZ).
 	 */
-	private static final class State {
-		private final int currentRegionX;
-		private final int currentRegionZ;
-		private final int directionIndex;
-		private final int stepsRemaining;
-		private final int stepsToChange;
-		private final int chunkX;
-		private final int chunkZ;
-
-		State() {
-			this(0, 0, 0, 1, 1, 0, 0);
-		}
-
-		State(int currentRegionX, int currentRegionZ, int directionIndex, int stepsRemaining, int stepsToChange, int chunkX, int chunkZ) {
-			this.currentRegionX = currentRegionX;
-			this.currentRegionZ = currentRegionZ;
-			this.directionIndex = directionIndex;
-			this.stepsRemaining = stepsRemaining;
-			this.stepsToChange = stepsToChange;
-			this.chunkX = chunkX;
-			this.chunkZ = chunkZ;
-		}
-
-		boolean isRegionComplete() {
-			return chunkX >= REGION_SIZE && chunkZ >= REGION_SIZE;
-		}
-
-		boolean isTraversalComplete() {
-			return false;
-		}
-
-		State advanceChunk() {
-			int newChunkX = chunkX;
-			int newChunkZ = chunkZ + 1;
-			if (newChunkZ >= REGION_SIZE) {
-				newChunkZ = 0;
-				newChunkX++;
-				if (newChunkX >= REGION_SIZE) {
-					newChunkX = REGION_SIZE;
-					newChunkZ = REGION_SIZE;
-				}
-			}
-			return new State(currentRegionX, currentRegionZ, directionIndex, stepsRemaining, stepsToChange, newChunkX, newChunkZ);
-		}
-
-		State prepareNextRegion() {
-			int newDirectionIndex = directionIndex;
-			int newStepsRemaining = stepsRemaining;
-			int newStepsToChange = stepsToChange;
-			int newCurrentRegionX = currentRegionX;
-			int newCurrentRegionZ = currentRegionZ;
-
-			if (newStepsRemaining == 0) {
-				newDirectionIndex = (newDirectionIndex + 1) & (DIRECTIONS_COUNT - 1);
-				if ((newDirectionIndex & 1) == 0) {
-					newStepsToChange++;
-				}
-				newStepsRemaining = newStepsToChange;
-			}
-			newCurrentRegionX += DX[newDirectionIndex];
-			newCurrentRegionZ += DZ[newDirectionIndex];
-			newStepsRemaining--;
-
-			return new State(newCurrentRegionX, newCurrentRegionZ, newDirectionIndex,
-					newStepsRemaining, newStepsToChange, 0, 0);
-		}
+	public synchronized int getChunkIndex() {
+		return (chunkX << 5) | chunkZ;
 	}
 
 	/**

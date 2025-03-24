@@ -1,18 +1,18 @@
 package main;
 
+import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.World;
 import org.bukkit.World.Environment;
-import org.bukkit.Chunk;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
-import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
+import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static main.ConsoleColorUtils.*;
@@ -33,7 +33,10 @@ public class PreGenerator implements Listener {
 	private static final String DISABLED_WARNING_MESSAGE = "pre-generator is already disabled.";
 	private static final String RADIUS_EXCEEDED_MESSAGE = "radius reached. To process more chunks, please increase the radius.";
 
+	// Detect Paper and Folia at runtime
 	private static final boolean IS_PAPER = detectPaper();
+	private static final boolean IS_FOLIA = detectFolia();
+
 	private long task_queue_timer;
 
 	public PreGenerator(JavaPlugin plugin) {
@@ -43,20 +46,28 @@ public class PreGenerator implements Listener {
 		this.load = new Load();
 		this.save = new Save();
 		this.print = new Print();
+
 		plugin.getServer().getPluginManager().registerEvents(playerEvents, plugin);
 	}
 
 	/**
 	 * Enables the pre-generator for a specific world.
 	 */
-	public synchronized void enable(int parallelTasksMultiplier, char timeUnit, int timeValue, int printTime, World world, long radius) {
+	public synchronized void enable(int parallelTasksMultiplier,
+			char timeUnit,
+			int timeValue,
+			int printTime,
+			World world,
+			long radius) {
 		int worldId = WorldIdManager.getWorldId(world);
+
 		synchronized (tasks) {
 			if (tasks.containsKey(worldId)) {
 				logColor(YELLOW, world.getName() + " " + ENABLED_WARNING_MESSAGE);
 				return;
 			}
 		}
+
 		PreGenerationTask task = new PreGenerationTask();
 		task.parallelTasksMultiplier = parallelTasksMultiplier;
 		task.timeUnit = timeUnit;
@@ -67,6 +78,7 @@ public class PreGenerator implements Listener {
 		task.enabled = true;
 		task.worldId = worldId;
 
+		// Determine task queue timer based on environment
 		if (world.getEnvironment() == Environment.NORMAL) {
 			task_queue_timer = PluginSettings.world_task_queue_timer();
 		} else if (world.getEnvironment() == Environment.NETHER) {
@@ -78,9 +90,25 @@ public class PreGenerator implements Listener {
 		synchronized (tasks) {
 			tasks.put(worldId, task);
 		}
+
 		task.timerStart = System.currentTimeMillis();
 		load.state(plugin, task);
 		initializeSchedulers(task);
+
+		// Initialize and schedule the cleanup scheduler for playerLoadedChunks.
+		task.cleanupScheduler = new AsyncDelayedScheduler();
+		task.cleanupScheduler.scheduleAtFixedRate(
+				() -> {
+					// If no players are in the task's world, clear the set.
+					if (task.world.getPlayers().isEmpty()) {
+						task.playerLoadedChunks.clear();
+					}
+				},
+				60000,  // initial delay: 60 seconds
+				60000,  // period: 60 seconds
+				TimeUnit.MILLISECONDS,
+				task.cleanupScheduler.isEnabledSupplier()
+				);
 
 		if (task.totalChunksProcessed.sum() >= radius) {
 			logColor(YELLOW, world.getName() + " " + RADIUS_EXCEEDED_MESSAGE);
@@ -92,9 +120,6 @@ public class PreGenerator implements Listener {
 		print.start(task);
 	}
 
-	/**
-	 * Initializes the schedulers for printing and task execution.
-	 */
 	private void initializeSchedulers(PreGenerationTask task) {
 		task.printScheduler = new AsyncDelayedScheduler();
 		task.taskSubmitScheduler = new AsyncDelayedScheduler();
@@ -106,6 +131,7 @@ public class PreGenerator implements Listener {
 	public synchronized void disable(World world) {
 		int worldId = WorldIdManager.getWorldId(world);
 		PreGenerationTask task;
+
 		synchronized (tasks) {
 			task = tasks.get(worldId);
 			if (task == null) {
@@ -119,8 +145,13 @@ public class PreGenerator implements Listener {
 			}
 			tasks.remove(worldId);
 		}
+
 		terminate(task);
-		HandlerList.unregisterAll(playerEvents);
+
+		// Only unregister the global player event listener if there are no tasks remaining.
+		if (tasks.isEmpty()) {
+			HandlerList.unregisterAll(playerEvents);
+		}
 	}
 
 	/**
@@ -137,95 +168,167 @@ public class PreGenerator implements Listener {
 		}
 		print.stop(task);
 		shutdownSchedulers(task);
+		task.playerLoadedChunks.clear();
 		task.enabled = false;
 		synchronized (tasks) {
 			tasks.remove(task.worldId);
 		}
 	}
 
-	/**
-	 * Disables both schedulers associated with the task.
-	 */
 	private void shutdownSchedulers(PreGenerationTask task) {
-		if (!task.enabled) {
-			return;
-		}
+		if (!task.enabled) return;
 		if (task.printScheduler != null) {
 			task.printScheduler.setEnabled(false);
 		}
 		if (task.taskSubmitScheduler != null) {
 			task.taskSubmitScheduler.setEnabled(false);
 		}
+		if (task.cleanupScheduler != null) {
+			task.cleanupScheduler.setEnabled(false);
+		}
 	}
 
 	/**
-	 * Starts the chunk generation process based on whether the server is running PaperMC.
+	 * Starts the chunk generation process using your custom AsyncDelayedScheduler for Folia, or existing paths for Paper/Spigot.
 	 */
 	private void startGeneration(PreGenerationTask task) {
-		if (IS_PAPER) {
+		if (IS_FOLIA) {
+			// FOLIA PATH with custom scheduler
 			task.taskSubmitScheduler.scheduleAtFixedRate(
 					() -> {
-						try {
-							if (!task.enabled) {
+						if (!task.enabled) return;
+
+						for (int i = 0; i < task.parallelTasksMultiplier; i++) {
+							if (task.totalChunksProcessed.sum() >= task.radius) {
+								saveTaskState(task);
+								task.taskSubmitScheduler.setEnabled(false);
 								return;
 							}
-							for (int i = 0; i < task.parallelTasksMultiplier; i++) {
-								if (task.totalChunksProcessed.sum() >= task.radius) {
-									saveTaskState(task);
-									return;
-								}
-								RegionChunkIterator.NextChunkResult nextChunkResult = task.chunkIterator.getNextChunkCoordinates();
-								if (nextChunkResult == null) {
-									saveTaskState(task);
-									return;
-								}
-								if (nextChunkResult.regionCompleted) {
-									saveTaskState(task);
-								}
-								ChunkPos nextChunkPos = nextChunkResult.chunkPos;
-								CompletableFuture.runAsync(() -> {
-									try {
-										processChunk(task, nextChunkPos);
-									} catch (Exception e) {
-										exceptionMsg("Exception in processChunk: " + e.getMessage());
-										e.printStackTrace();
-									}
-								}).exceptionally(ex -> {
-									exceptionMsg("Exception in CompletableFuture in chunk generation: " + ex.getMessage());
-									ex.printStackTrace();
-									return null;
-								});
+							RegionChunkIterator.NextChunkResult nextChunkResult =
+									task.chunkIterator.getNextChunkCoordinates();
+							if (nextChunkResult == null) {
+								saveTaskState(task);
+								task.taskSubmitScheduler.setEnabled(false);
+								return;
 							}
-						} catch (Exception e) {
-							exceptionMsg("Exception in repeated chunk generation: " + e.getMessage());
-							e.printStackTrace();
+							// Restore saving after region completion
+							if (nextChunkResult.regionCompleted) {
+								saveTaskState(task);
+							}
+							ChunkPos nextChunkPos = nextChunkResult.chunkPos;
+							processChunkFolia(task, nextChunkPos);
 						}
 					},
-					0, task_queue_timer, TimeUnit.MILLISECONDS, task.taskSubmitScheduler.isEnabledSupplier());
+					1,
+					task_queue_timer,
+					TimeUnit.MILLISECONDS,
+					task.taskSubmitScheduler.isEnabledSupplier()
+					);
+		} else if (IS_PAPER) {
+			// PAPER PATH
+			task.taskSubmitScheduler.scheduleAtFixedRate(
+					() -> {
+						if (!task.enabled) return;
+						for (int i = 0; i < task.parallelTasksMultiplier; i++) {
+							if (task.totalChunksProcessed.sum() >= task.radius) {
+								saveTaskState(task);
+								return;
+							}
+							RegionChunkIterator.NextChunkResult nextChunkResult =
+									task.chunkIterator.getNextChunkCoordinates();
+							if (nextChunkResult == null) {
+								saveTaskState(task);
+								return;
+							}
+							// Restore saving after region completion
+							if (nextChunkResult.regionCompleted) {
+								saveTaskState(task);
+							}
+							ChunkPos nextChunkPos = nextChunkResult.chunkPos;
+							CompletableFuture.runAsync(() -> {
+								try {
+									processChunkPaper(task, nextChunkPos);
+								} catch (Exception e) {
+									exceptionMsg("Exception in processChunkPaper: " + e.getMessage());
+									e.printStackTrace();
+								}
+							}).exceptionally(ex -> {
+								exceptionMsg("Exception in CompletableFuture: " + ex.getMessage());
+								ex.printStackTrace();
+								return null;
+							});
+						}
+					},
+					0,
+					task_queue_timer,
+					TimeUnit.MILLISECONDS,
+					task.taskSubmitScheduler.isEnabledSupplier()
+					);
 		} else {
-			new BukkitRunnable() {
+			// SPIGOT / BUKKIT PATH (unchanged)
+			new org.bukkit.scheduler.BukkitRunnable() {
 				@Override
 				public void run() {
+					if (!task.enabled) {
+						cancel();
+						return;
+					}
 					task.tasks = Math.max(1, (int) (task.parallelTasksMultiplier / 2.5));
 					for (int i = 0; i < task.tasks; i++) {
 						syncProcess(task);
 					}
 				}
-			}.runTaskTimer(plugin, 0L, 0L);
+			}.runTaskTimer(plugin, 0L, 1L);
 		}
 	}
 
 	/**
-	 * Synchronously processes chunk loading tasks.
+	 * Folia chunk processing.
+	 */
+	private void processChunkFolia(PreGenerationTask task, ChunkPos chunkPos) {
+		if (!task.enabled) return;
+		Bukkit.getRegionScheduler().execute(plugin, task.world, chunkPos.getX(), chunkPos.getZ(), () -> {
+			if (!task.enabled) return;
+			task.world.getChunkAtAsync(chunkPos.getX(), chunkPos.getZ(), true).thenAccept(chunk -> {
+				if (chunk != null && chunk.isLoaded()) {
+					Bukkit.getRegionScheduler().execute(plugin, task.world, chunkPos.getX(), chunkPos.getZ(), () -> {
+						chunk.unload(true);
+						task.totalChunksProcessed.increment();
+						task.chunksThisCycle++;
+						completionCheck(task);
+					});
+				} else {
+					task.totalChunksProcessed.increment();
+					completionCheck(task);
+				}
+			}).exceptionally(ex -> {
+				exceptionMsg("Async chunk load exception in processChunkFolia: " + ex.getMessage());
+				ex.printStackTrace();
+				task.totalChunksProcessed.increment();
+				completionCheck(task);
+				return null;
+			});
+		});
+	}
+
+	/**
+	 * Paper: async chunk load then immediate unload.
+	 */
+	private void processChunkPaper(PreGenerationTask task, ChunkPos chunkPos) {
+		if (!task.enabled) return;
+		getChunkAsync(task, chunkPos, true);
+		task.totalChunksProcessed.increment();
+		task.chunksThisCycle++;
+		completionCheck(task);
+	}
+
+	/**
+	 * Spigot/Bukkit synchronous chunk processing.
 	 */
 	private void syncProcess(PreGenerationTask task) {
 		try {
-			if (!task.enabled) {
-				return;
-			}
-			if (task.totalChunksProcessed.sum() >= task.radius) {
-				return;
-			}
+			if (!task.enabled) return;
+			if (task.totalChunksProcessed.sum() >= task.radius) return;
 			RegionChunkIterator.NextChunkResult nextChunkResult = task.chunkIterator.getNextChunkCoordinates();
 			if (nextChunkResult == null) {
 				saveTaskState(task);
@@ -235,7 +338,7 @@ public class PreGenerator implements Listener {
 				saveTaskState(task);
 			}
 			ChunkPos chunkPos = nextChunkResult.chunkPos;
-			handleChunk(task, chunkPos);
+			handleChunkBukkit(task, chunkPos);
 			completionCheck(task);
 		} catch (Exception e) {
 			exceptionMsg("Exception in syncProcess: " + e.getMessage());
@@ -243,38 +346,28 @@ public class PreGenerator implements Listener {
 		}
 	}
 
-	/**
-	 * Saves the task state.
-	 */
-	private void saveTaskState(PreGenerationTask task) {
-		save.state(plugin, task);
-	}
-
-	/**
-	 * Asynchronously retrieves a chunk using the world's async method and unloads it after loading.
-	 */
-	private void processChunk(PreGenerationTask task, ChunkPos chunkPos) {
+	private void handleChunkBukkit(PreGenerationTask task, ChunkPos chunkPos) {
 		try {
-			if (!task.enabled) {
-				return;
+			if (!task.enabled) return;
+			Chunk chunk = task.world.getChunkAt(chunkPos.getX(), chunkPos.getZ());
+			chunk.load(true);
+			while (chunk.isLoaded() && !chunk.isEntitiesLoaded()) {
+				boolean unloaded = task.world.unloadChunk(chunk.getX(), chunk.getZ(), true);
+				if (!unloaded) break;
 			}
-			getChunkAsync(task, chunkPos, true);
 			task.totalChunksProcessed.increment();
 			task.chunksThisCycle++;
-			completionCheck(task);
 		} catch (Exception e) {
-			exceptionMsg("Exception in processChunk: " + e.getMessage());
+			exceptionMsg("Exception in handleChunkBukkit: " + e.getMessage());
 			e.printStackTrace();
 		}
 	}
 
 	/**
-	 * Asynchronously retrieves a chunk using the world's async method and unloads it after loading.
+	 * Paper's getChunkAtAsync + immediate unload.
 	 */
 	private void getChunkAsync(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
-		if (!task.enabled) {
-			return;
-		}
+		if (!task.enabled) return;
 		CompletableFuture<Chunk> future = task.world.getChunkAtAsync(chunkPos.getX(), chunkPos.getZ(), gen);
 		future.thenAccept(chunk -> {
 			if (chunk != null && chunk.isLoaded()) {
@@ -288,45 +381,23 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Handles chunk loading and unloading synchronously.
+	 * Saves current progress to disk.
 	 */
-	private void handleChunk(PreGenerationTask task, ChunkPos chunkPos) {
-		try {
-			if (!task.enabled) {
-				return;
-			}
-			Chunk chunk = task.world.getChunkAt(chunkPos.getX(), chunkPos.getZ());
-			chunk.load(true);
-			while (chunk.isLoaded() && !chunk.isEntitiesLoaded()) {
-				boolean unloaded = task.world.unloadChunk(chunk.getX(), chunk.getZ(), true);
-				if (!unloaded) {
-					break;
-				}
-			}
-			task.totalChunksProcessed.increment();
-			task.chunksThisCycle++;
-		} catch (Exception e) {
-			exceptionMsg("Exception in handleChunk: " + e.getMessage());
-			e.printStackTrace();
-		}
+	private void saveTaskState(PreGenerationTask task) {
+		save.state(plugin, task);
 	}
 
 	/**
-	 * Checks if the chunk processing has completed based on the radius.
+	 * Checks if the radius limit is reached and terminates the task.
 	 */
 	private void completionCheck(PreGenerationTask task) {
-		if (!task.enabled) {
-			return;
-		}
+		if (!task.enabled) return;
 		if (task.totalChunksProcessed.sum() >= task.radius) {
 			task.complete = true;
 			terminate(task);
 		}
 	}
 
-	/**
-	 * Handles chunk load events to manage chunk unloading during pre-generation.
-	 */
 	@EventHandler(priority = EventPriority.HIGHEST)
 	private void onChunkLoad(ChunkLoadEvent event) {
 		try {
@@ -335,9 +406,7 @@ public class PreGenerator implements Listener {
 			synchronized (tasks) {
 				task = tasks.get(worldId);
 			}
-			if (task == null || !task.enabled) {
-				return;
-			}
+			if (task == null || !task.enabled) return;
 			handleChunkLoad(task, event);
 		} catch (Exception e) {
 			exceptionMsg("Exception in onChunkLoad: " + e.getMessage());
@@ -345,20 +414,15 @@ public class PreGenerator implements Listener {
 		}
 	}
 
-	/**
-	 * Processes a chunk load event, unloading chunks that shouldn't remain loaded.
-	 */
 	private void handleChunkLoad(PreGenerationTask task, ChunkLoadEvent event) {
 		try {
-			if (!task.enabled) {
-				return;
-			}
+			if (!task.enabled) return;
 			Chunk chunk = event.getChunk();
-			if (chunk == null) {
-				return;
-			}
-			ChunkPos chunkPos = new ChunkPos(chunk.getX(), chunk.getZ());
+			if (chunk == null) return;
+			// Use the new factory method instead of the constructor.
+			ChunkPos chunkPos = ChunkPos.get(chunk.getX(), chunk.getZ());
 			if (task.playerLoadedChunks.contains(chunkPos)) {
+				// If a player explicitly loaded it, don't unload.
 				return;
 			}
 			if (!event.isNewChunk()) {
@@ -373,11 +437,23 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Detects if the server is running PaperMC.
+	 * Detect if running Paper.
 	 */
 	private static boolean detectPaper() {
 		try {
 			Class.forName("com.destroystokyo.paper.PaperConfig");
+			return true;
+		} catch (ClassNotFoundException e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Detect if running Folia.
+	 */
+	private static boolean detectFolia() {
+		try {
+			Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
 			return true;
 		} catch (ClassNotFoundException e) {
 			return false;

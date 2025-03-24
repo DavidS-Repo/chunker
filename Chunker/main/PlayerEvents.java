@@ -46,8 +46,9 @@ public class PlayerEvents implements Listener {
 			if (fromChunk.equals(toChunk)) {
 				return;
 			}
-			ChunkPos fromChunkPos = new ChunkPos(fromChunk.getX(), fromChunk.getZ());
-			ChunkPos toChunkPos = new ChunkPos(toChunk.getX(), toChunk.getZ());
+			// Use the new factory method instead of the constructor.
+			ChunkPos fromChunkPos = ChunkPos.get(fromChunk.getX(), fromChunk.getZ());
+			ChunkPos toChunkPos = ChunkPos.get(toChunk.getX(), toChunk.getZ());
 			UUID playerId = player.getUniqueId();
 			synchronized (tasks) {
 				for (PreGenerationTask task : tasks.values()) {
@@ -130,7 +131,8 @@ public class PlayerEvents implements Listener {
 					if (task.world.equals(newWorld)) {
 						task.playerChunkMap.computeIfAbsent(playerId, k -> ConcurrentHashMap.newKeySet());
 						Set<ChunkPos> newPlayerChunks = task.playerChunkMap.get(playerId);
-						ChunkPos toChunkPos = new ChunkPos(toChunk.getX(), toChunk.getZ());
+						// Use the new factory method instead of the constructor.
+						ChunkPos toChunkPos = ChunkPos.get(toChunk.getX(), toChunk.getZ());
 						if (newPlayerChunks.add(toChunkPos)) {
 							task.playerLoadedChunks.add(toChunkPos);
 						}

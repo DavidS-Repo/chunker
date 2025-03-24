@@ -9,98 +9,82 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import static main.ConsoleColorUtils.*;
 
-/**
- * Manages server state by adjusting game rules and optimizing performance based on player activity.
- */
 public class ServerStateManager implements Listener {
 
 	private JavaPlugin plugin;
-	private BukkitTask playerCheckTask;
 	private PreGeneratorCommands preGenCommands;
+	private boolean isFolia;
+	// Boolean flag to ensure optimization runs only once when the server is empty.
+	private boolean optimized;
 
 	private static final int DSCR = 0, DRTS = 3;
 	private static final boolean DDMS = true, DDFT = true;
 
-	/**
-	 * Constructs a ServerStateManager.
-	 *
-	 * @param plugin         the JavaPlugin instance
-	 * @param preGenCommands the PreGeneratorCommands instance
-	 */
 	public ServerStateManager(JavaPlugin plugin, PreGeneratorCommands preGenCommands) {
 		this.plugin = plugin;
 		this.preGenCommands = preGenCommands;
+		this.isFolia = checkIfFolia();
+		this.optimized = false; // Initially, we haven't optimized yet.
+
 		Bukkit.getPluginManager().registerEvents(this, plugin);
-		startPlayerCheckTask();
+
+		// If the server starts with no players online, optimize once.
+		if (areNoPlayersInServer() && !optimized) {
+			optimizeForNoPlayers();
+		}
 	}
 
-	/**
-	 * Resets game rules to defaults when a player joins and stops pre-generation tasks.
-	 *
-	 * @param event the player join event
-	 */
+	private boolean checkIfFolia() {
+		try {
+			Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+			logColor(GREEN, "Folia detected: Enabling Folia-specific support.");
+			return true;
+		} catch (ClassNotFoundException ignored) {
+			logColor(YELLOW, "Folia not detected: Running in standard mode.");
+			return false;
+		}
+	}
+
 	@EventHandler
 	public void onPlayerJoin(PlayerJoinEvent event) {
-		resetGameRulesToDefaults();
-		preGenCommands.handlePreGenOffCommand(Bukkit.getConsoleSender(), new String[0]);
+		runOnGlobal(() -> {
+			// Reset game rules and turn off pre-generation
+			resetGameRulesToDefaults();
+			preGenCommands.handlePreGenOffCommand(Bukkit.getConsoleSender(), new String[0]);
+			// Reset the flag so optimization will run next time all players disconnect.
+			optimized = false;
+		});
 	}
 
-	/**
-	 * Checks for no players online when a player quits to optimize server performance.
-	 *
-	 * @param event the player quit event
-	 */
 	@EventHandler
 	public void onPlayerQuit(PlayerQuitEvent event) {
-		Bukkit.getScheduler().runTaskLater(plugin, () -> {
-			if (areNoPlayersInServer()) {
+		// Delay a bit to allow the disconnect to process.
+		runTaskLater(() -> {
+			if (areNoPlayersInServer() && !optimized) {
 				optimizeForNoPlayers();
 			}
 		}, 20L);
 	}
 
-	/**
-	 * Starts a repeating task to check for player activity.
-	 */
-	private void startPlayerCheckTask() {
-		playerCheckTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-			if (areNoPlayersInServer()) {
-				optimizeForNoPlayers();
-				if (playerCheckTask != null) {
-					playerCheckTask.cancel();
-					playerCheckTask = null;
-				}
-			}
-		}, 20L, 20L);
-	}
-
-	/**
-	 * Optimizes server settings when no players are online.
-	 */
 	private void optimizeForNoPlayers() {
-		logColor(WHITE, "No players detected");
-		logColor(WHITE, "Optimizing for Pre-Generation");
-		setGameRulesForPerformance();
-		unloadAllChunksInAllWorlds();
-		preGenCommands.checkAndRunAutoPreGenerators();
+		runOnGlobal(() -> {
+			logColor(WHITE, "No players detected");
+			logColor(WHITE, "Optimizing for Pre-Generation");
+			setGameRulesForPerformance();
+			unloadAllChunksInAllWorlds();
+			preGenCommands.checkAndRunAutoPreGenerators();
+			// Mark that optimization has been done.
+			optimized = true;
+		});
 	}
 
-	/**
-	 * Checks if there are no players on the server.
-	 *
-	 * @return true if no players are online
-	 */
 	private boolean areNoPlayersInServer() {
 		return Bukkit.getOnlinePlayers().isEmpty();
 	}
 
-	/**
-	 * Sets game rules to improve performance during pre-generation.
-	 */
 	private void setGameRulesForPerformance() {
 		for (World world : Bukkit.getWorlds()) {
 			GLI(world, GameRule.SPAWN_CHUNK_RADIUS, 0);
@@ -110,9 +94,6 @@ public class ServerStateManager implements Listener {
 		}
 	}
 
-	/**
-	 * Resets game rules to their default values.
-	 */
 	private void resetGameRulesToDefaults() {
 		for (World world : Bukkit.getWorlds()) {
 			GLI(world, GameRule.SPAWN_CHUNK_RADIUS, DSCR);
@@ -122,22 +103,43 @@ public class ServerStateManager implements Listener {
 		}
 	}
 
+	private void unloadAllChunksInAllWorlds() {
+		for (World world : Bukkit.getWorlds()) {
+			for (Chunk chunk : world.getLoadedChunks()) {
+				if (isFolia) {
+					Bukkit.getRegionScheduler().execute(plugin, world, chunk.getX(), chunk.getZ(), () -> {
+						if (chunk.isLoaded()) {
+							world.unloadChunk(chunk);
+						}
+					});
+				} else {
+					world.unloadChunk(chunk);
+				}
+			}
+		}
+	}
+
+	private void runTaskLater(Runnable task, long delay) {
+		if (isFolia) {
+			plugin.getServer().getGlobalRegionScheduler().runDelayed(plugin, t -> task.run(), delay);
+		} else {
+			Bukkit.getScheduler().runTaskLater(plugin, task, delay);
+		}
+	}
+
+	private void runOnGlobal(Runnable task) {
+		if (isFolia) {
+			plugin.getServer().getGlobalRegionScheduler().execute(plugin, task);
+		} else {
+			Bukkit.getScheduler().runTask(plugin, task);
+		}
+	}
+
 	public static void GLI(World world, GameRule<Integer> gameRule, int value) {
 		world.setGameRule(gameRule, value);
 	}
 
 	public static void GLB(World world, GameRule<Boolean> gameRule, boolean value) {
 		world.setGameRule(gameRule, value);
-	}
-
-	/**
-	 * Unloads all loaded chunks in all worlds.
-	 */
-	private void unloadAllChunksInAllWorlds() {
-		for (World world : Bukkit.getWorlds()) {
-			for (Chunk chunk : world.getLoadedChunks()) {
-				world.unloadChunk(chunk);
-			}
-		}
 	}
 }

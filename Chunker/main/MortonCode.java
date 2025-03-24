@@ -50,9 +50,6 @@ public final class MortonCode {
 
 	/**
 	 * Interleaves the bits of a 32-bit integer for Morton encoding.
-	 *
-	 * @param x the integer to interleave
-	 * @return the interleaved bits
 	 */
 	private static long interleaveBits(long x) {
 		x &= 0xFFFFFFFFL;
@@ -66,9 +63,6 @@ public final class MortonCode {
 
 	/**
 	 * Deinterleaves bits from a Morton code to retrieve the original integer.
-	 *
-	 * @param x the interleaved bits
-	 * @return the original integer
 	 */
 	private static long deinterleaveBits(long x) {
 		x &= MASK_1;
