@@ -24,7 +24,7 @@ Describe what you expected to happen.
 Add screenshots or relevant logs to help explain your problem.
 
 **Server Information (Please complete the following):**
-- **Minecraft Version**: [e.g., 1.20.1]
+- **Minecraft Version**: [e.g., 1.20.2]
 - **Server Type**: [e.g., Paper, Spigot, Bukkit, Folia]
 - **Other Plugins Installed (Optional)**: [List major ones that may interfere]
 
