@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>Chunker</groupId>
 	<artifactId>Chunker</artifactId>
-	<version>1.21.4</version>
+	<version>1.21.5</version>
 	<name>Chunker</name>
 	<description>Fast and Efficient Async Minecraft World Pre-generator</description>
 	<repositories>

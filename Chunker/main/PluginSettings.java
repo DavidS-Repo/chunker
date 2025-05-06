@@ -4,271 +4,146 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.*;
+import java.io.StringReader;
 
 /**
- * Manages plugin settings by loading and saving configurations from a YAML file.
+ * Manages settings.yml by loading, saving, and creating default entries
+ * for every world folder detected in the server root.
  */
 public class PluginSettings {
 	private final JavaPlugin plugin;
-	private final CustomConfig customConfig;
+	private final CustomConfig configLoader;
 	private static YamlConfiguration config;
 
 	/**
-	 * Initializes the PluginSettings with the given plugin instance.
+	 * Creates a new PluginSettings handler.
 	 *
-	 * @param plugin the JavaPlugin instance
+	 * @param plugin the main plugin instance
 	 */
 	public PluginSettings(JavaPlugin plugin) {
 		this.plugin = plugin;
-		this.customConfig = new CustomConfig(plugin, "settings.yml");
-		initializeConfig();
+		this.configLoader = new CustomConfig(plugin, "settings.yml");
+		initConfig();
 	}
 
-	/**
-	 * Initializes the configuration by loading or creating the settings file.
-	 */
-	private void initializeConfig() {
+	// ensure data folder and settings.yml exist, then load
+	private void initConfig() {
 		if (!plugin.getDataFolder().exists()) {
 			plugin.getDataFolder().mkdirs();
 		}
-		File configFile = new File(plugin.getDataFolder(), "settings.yml");
-		if (!configFile.exists()) {
-			extractDefaultConfig(configFile);
+		File settingsFile = new File(plugin.getDataFolder(), "settings.yml");
+		if (!settingsFile.exists()) {
+			extractDefaultSettings(settingsFile);
 		}
-		loadConfig();
+		loadSettings();
 	}
 
-	/**
-	 * Extracts the default settings.yml from the plugin JAR to the data folder.
-	 *
-	 * @param configFile the target configuration file
-	 */
-	private void extractDefaultConfig(File configFile) {
-		try (InputStream inputStream = plugin.getResource("settings.yml")) {
-			if (inputStream == null) {
-				throw new FileNotFoundException("Default settings.yml not found in JAR.");
+	// copy bundled settings.yml from JAR into plugin folder
+	private void extractDefaultSettings(File destFile) {
+		try (InputStream in = plugin.getResource("settings.yml");
+				OutputStream out = new FileOutputStream(destFile)) {
+			if (in == null) {
+				plugin.getLogger().severe("Default settings.yml not found in JAR");
+				return;
 			}
-			try (OutputStream outputStream = new FileOutputStream(configFile)) {
-				byte[] buffer = new byte[1024];
-				int length;
-				while ((length = inputStream.read(buffer)) != -1) {
-					outputStream.write(buffer, 0, length);
-				}
+			byte[] buffer = new byte[1024];
+			int read;
+			while ((read = in.read(buffer)) > 0) {
+				out.write(buffer, 0, read);
 			}
 		} catch (IOException e) {
-			plugin.getLogger().severe("Could not extract default settings.yml!");
+			plugin.getLogger().severe("Failed to extract default settings.yml");
 			e.printStackTrace();
 		}
 	}
 
-	/**
-	 * Loads the configuration from the settings file.
-	 */
-	private void loadConfig() {
-		String configContent = customConfig.loadConfig();
-		config = YamlConfiguration.loadConfiguration(new StringReader(configContent));
-		loadDefaults();
+	// load YAML into memory, apply defaults, then save back
+	private void loadSettings() {
+		String raw = configLoader.loadConfig();
+		config = YamlConfiguration.loadConfiguration(new StringReader(raw));
+		populateDefaultsForAllWorlds();
+		saveSettings();
 	}
 
-	/**
-	 * Loads default values into the configuration if they are not set.
-	 */
-	private void loadDefaults() {
-		// Overworld settings
-		config.addDefault("world.auto_run", false);
-		config.addDefault("world.task_queue_timer", 60);
-		config.addDefault("world.parallel_tasks_multiplier", "auto");
-		config.addDefault("world.print_update_delay", "5s");
-		config.addDefault("world.radius", "default");
+	// for each folder with a level.dat, add default settings if missing
+	private void populateDefaultsForAllWorlds() {
+		File worldContainer = plugin.getServer().getWorldContainer();
+		File[] worldFolders = worldContainer.listFiles();
+		if (worldFolders == null) return;
 
-		// Nether settings
-		config.addDefault("world_nether.auto_run", false);
-		config.addDefault("world_nether.task_queue_timer", 60);
-		config.addDefault("world_nether.parallel_tasks_multiplier", "auto");
-		config.addDefault("world_nether.print_update_delay", "5s");
-		config.addDefault("world_nether.radius", "default");
+		for (File worldFolder : worldFolders) {
+			if (!worldFolder.isDirectory()) continue;
+			File levelDat = new File(worldFolder, "level.dat");
+			if (!levelDat.exists()) continue;
 
-		// End settings
-		config.addDefault("world_the_end.auto_run", false);
-		config.addDefault("world_the_end.task_queue_timer", 60);
-		config.addDefault("world_the_end.parallel_tasks_multiplier", "auto");
-		config.addDefault("world_the_end.print_update_delay", "5s");
-		config.addDefault("world_the_end.radius", "default");
-
+			String name = worldFolder.getName();
+			String basePath = name + ".";
+			config.addDefault(basePath + "auto_run", false);
+			config.addDefault(basePath + "task_queue_timer", 60);
+			config.addDefault(basePath + "parallel_tasks_multiplier", "auto");
+			config.addDefault(basePath + "print_update_delay", "5s");
+			config.addDefault(basePath + "radius", "default");
+		}
 		config.options().copyDefaults(true);
-		saveConfig();
 	}
 
 	/**
-	 * Saves the configuration to the settings file.
+	 * Writes any changes back to settings.yml.
 	 */
-	public void saveConfig() {
+	public void saveSettings() {
 		try {
-			File tempFile = File.createTempFile("temp", ".yml");
-			config.save(tempFile);
-			StringWriter writer = new StringWriter();
-			BufferedReader reader = new BufferedReader(new FileReader(tempFile));
-			String line;
-			while ((line = reader.readLine()) != null) {
-				writer.write(line);
-				writer.write(System.lineSeparator());
-			}
-			reader.close();
-			customConfig.saveConfig(writer.toString());
-			tempFile.delete();
-		} catch (Exception e) {
-			plugin.getLogger().severe("Could not save the settings.yml file!");
+			File outFile = new File(plugin.getDataFolder(), "settings.yml");
+			config.save(outFile);
+		} catch (IOException e) {
+			plugin.getLogger().severe("Could not save settings.yml");
 			e.printStackTrace();
 		}
 	}
 
 	/**
-	 * Returns the number of available processor threads.
-	 *
-	 * @return the number of processor threads
+	 * @return number of CPU cores available to the JVM
 	 */
-	public static int THREADS() {
+	public static int getAvailableProcessors() {
 		return Runtime.getRuntime().availableProcessors();
 	}
 
-	// Overworld getters
-
 	/**
-	 * Checks if auto-run is enabled for the overworld.
-	 *
-	 * @return true if auto-run is enabled
+	 * @param worldName the name of the world folder
+	 * @return whether auto-run is enabled for that world
 	 */
-	public static boolean world_auto_run() {
-		return config.getBoolean("world.auto_run");
+	public static boolean getAutoRun(String worldName) {
+		return config.getBoolean(worldName + ".auto_run");
 	}
 
 	/**
-	 * Gets the task queue timer for the overworld.
-	 *
-	 * @return the task queue timer value
+	 * @param worldName the name of the world folder
+	 * @return configured task queue timer (in ticks)
 	 */
-	public static long world_task_queue_timer() {
-		return config.getLong("world.task_queue_timer");
+	public static int getTaskQueueTimer(String worldName) {
+		return (int) config.getLong(worldName + ".task_queue_timer");
 	}
 
 	/**
-	 * Gets the parallel tasks multiplier for the overworld.
-	 *
-	 * @return the parallel tasks multiplier
+	 * @param worldName the name of the world folder
+	 * @return configured parallel tasks multiplier ("auto" or number)
 	 */
-	public static String world_parallel_tasks_multiplier() {
-		return config.getString("world.parallel_tasks_multiplier");
+	public static String getParallelTasksMultiplier(String worldName) {
+		return config.getString(worldName + ".parallel_tasks_multiplier");
 	}
 
 	/**
-	 * Gets the print update delay for the overworld.
-	 *
-	 * @return the print update delay
+	 * @param worldName the name of the world folder
+	 * @return configured print update delay (e.g. "5s")
 	 */
-	public static String world_print_update_delay() {
-		return config.getString("world.print_update_delay");
+	public static String getPrintUpdateDelay(String worldName) {
+		return config.getString(worldName + ".print_update_delay");
 	}
 
 	/**
-	 * Gets the radius setting for the overworld.
-	 *
-	 * @return the radius setting
+	 * @param worldName the name of the world folder
+	 * @return configured radius ("default" or value like "10c")
 	 */
-	public static String world_radius() {
-		return config.getString("world.radius", "default");
-	}
-
-	// Nether getters
-
-	/**
-	 * Checks if auto-run is enabled for the nether.
-	 *
-	 * @return true if auto-run is enabled
-	 */
-	public static boolean world_nether_auto_run() {
-		return config.getBoolean("world_nether.auto_run");
-	}
-
-	/**
-	 * Gets the task queue timer for the nether.
-	 *
-	 * @return the task queue timer value
-	 */
-	public static long world_nether_task_queue_timer() {
-		return config.getLong("world_nether.task_queue_timer");
-	}
-
-	/**
-	 * Gets the parallel tasks multiplier for the nether.
-	 *
-	 * @return the parallel tasks multiplier
-	 */
-	public static String world_nether_parallel_tasks_multiplier() {
-		return config.getString("world_nether.parallel_tasks_multiplier");
-	}
-
-	/**
-	 * Gets the print update delay for the nether.
-	 *
-	 * @return the print update delay
-	 */
-	public static String world_nether_print_update_delay() {
-		return config.getString("world_nether.print_update_delay");
-	}
-
-	/**
-	 * Gets the radius setting for the nether.
-	 *
-	 * @return the radius setting
-	 */
-	public static String world_nether_radius() {
-		return config.getString("world_nether.radius", "default");
-	}
-
-	// End getters
-
-	/**
-	 * Checks if auto-run is enabled for the end.
-	 *
-	 * @return true if auto-run is enabled
-	 */
-	public static boolean world_the_end_auto_run() {
-		return config.getBoolean("world_the_end.auto_run");
-	}
-
-	/**
-	 * Gets the task queue timer for the end.
-	 *
-	 * @return the task queue timer value
-	 */
-	public static long world_the_end_task_queue_timer() {
-		return config.getLong("world_the_end.task_queue_timer");
-	}
-
-	/**
-	 * Gets the parallel tasks multiplier for the end.
-	 *
-	 * @return the parallel tasks multiplier
-	 */
-	public static String world_the_end_parallel_tasks_multiplier() {
-		return config.getString("world_the_end.parallel_tasks_multiplier");
-	}
-
-	/**
-	 * Gets the print update delay for the end.
-	 *
-	 * @return the print update delay
-	 */
-	public static String world_the_end_print_update_delay() {
-		return config.getString("world_the_end.print_update_delay");
-	}
-
-	/**
-	 * Gets the radius setting for the end.
-	 *
-	 * @return the radius setting
-	 */
-	public static String world_the_end_radius() {
-		return config.getString("world_the_end.radius", "default");
+	public static String getRadius(String worldName) {
+		return config.getString(worldName + ".radius", "default");
 	}
 }

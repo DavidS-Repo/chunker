@@ -3,7 +3,6 @@ package main;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.World;
-import org.bukkit.World.Environment;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.world.ChunkLoadEvent;
@@ -41,7 +40,7 @@ public class PreGenerator implements Listener {
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
-		logPlain("Available Processors: " + PluginSettings.THREADS());
+		logPlain("Available Processors: " + PluginSettings.getAvailableProcessors());
 		this.playerEvents = new PlayerEvents(tasks);
 		this.load = new Load();
 		this.save = new Save();
@@ -79,13 +78,7 @@ public class PreGenerator implements Listener {
 		task.worldId = worldId;
 
 		// Determine task queue timer based on environment
-		if (world.getEnvironment() == Environment.NORMAL) {
-			task_queue_timer = PluginSettings.world_task_queue_timer();
-		} else if (world.getEnvironment() == Environment.NETHER) {
-			task_queue_timer = PluginSettings.world_nether_task_queue_timer();
-		} else if (world.getEnvironment() == Environment.THE_END) {
-			task_queue_timer = PluginSettings.world_the_end_task_queue_timer();
-		}
+		task_queue_timer = PluginSettings.getTaskQueueTimer(world.getName());
 
 		synchronized (tasks) {
 			tasks.put(worldId, task);

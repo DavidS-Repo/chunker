@@ -21,23 +21,10 @@
 # radius: Defines how far the pre-generator should run (b-Blocks, c-Chunks, r-Regions) or 'default' to pre-generate until the world border.
 
 # Settings
-world:
-  auto_run: false # Acceptable values: true or false
-  task_queue_timer: 60 # Acceptable range: positive integer
-  parallel_tasks_multiplier: auto # 'auto' or a positive integer value
-  print_update_delay: 5s # Format: [value][s|m|h]. Example: 5s, 2h, 1d
-  radius: default # Format: [value][b|c|r]. Example: 100b, 1c, 10r, or 'default'
+# exampleWorldName:
+#   auto_run: false # Acceptable values: true or false
+#   task_queue_timer: 60 # Acceptable range: positive integer
+#   parallel_tasks_multiplier: auto # 'auto' or a positive integer value
+#   print_update_delay: 5s # Format: [value][s|m|h]. Example: 5s, 2h, 1d
+#   radius: default # Format: [value][b|c|r]. Example: 100b, 1c, 10r, or 'default'
 
-world_nether:
-  auto_run: false
-  task_queue_timer: 60
-  parallel_tasks_multiplier: auto
-  print_update_delay: 5s
-  radius: default
-
-world_the_end:
-  auto_run: false
-  task_queue_timer: 60
-  parallel_tasks_multiplier: auto
-  print_update_delay: 5s
-  radius: default
