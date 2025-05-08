@@ -9,15 +9,17 @@ import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.command.CommandSender;
 
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 
 import static main.ConsoleColorUtils.*;
 
 /**
- * PreGenerator is responsible for pre-generating chunks asynchronously to improve server performance.
+ * PreGenerator is responsible for pre-generating chunks asynchronously
+ * to improve server performance.
  */
 public class PreGenerator implements Listener {
 
@@ -28,9 +30,9 @@ public class PreGenerator implements Listener {
 	private final Save save;
 	private final ConcurrentHashMap<Integer, PreGenerationTask> tasks = new ConcurrentHashMap<>();
 
-	private static final String ENABLED_WARNING_MESSAGE = "pre-generator is already enabled.";
-	private static final String DISABLED_WARNING_MESSAGE = "pre-generator is already disabled.";
-	private static final String RADIUS_EXCEEDED_MESSAGE = "radius reached. To process more chunks, please increase the radius.";
+	private static final String ENABLED_WARNING_MESSAGE   = "pre-generator is already enabled.";
+	private static final String DISABLED_WARNING_MESSAGE  = "pre-generator is already disabled.";
+	private static final String RADIUS_EXCEEDED_MESSAGE   = "radius reached. To process more chunks, please increase the radius.";
 
 	// Detect Paper and Folia at runtime
 	private static final boolean IS_PAPER = detectPaper();
@@ -42,17 +44,17 @@ public class PreGenerator implements Listener {
 		this.plugin = plugin;
 		logPlain("Available Processors: " + PluginSettings.getAvailableProcessors());
 		this.playerEvents = new PlayerEvents(tasks);
-		this.load = new Load();
-		this.save = new Save();
+		this.load  = new Load();
+		this.save  = new Save();
 		this.print = new Print();
-
 		plugin.getServer().getPluginManager().registerEvents(playerEvents, plugin);
 	}
 
 	/**
 	 * Enables the pre-generator for a specific world.
 	 */
-	public synchronized void enable(int parallelTasksMultiplier,
+	public synchronized void enable(CommandSender sender,
+			int parallelTasksMultiplier,
 			char timeUnit,
 			int timeValue,
 			int printTime,
@@ -62,22 +64,21 @@ public class PreGenerator implements Listener {
 
 		synchronized (tasks) {
 			if (tasks.containsKey(worldId)) {
-				logColor(YELLOW, world.getName() + " " + ENABLED_WARNING_MESSAGE);
+				colorMessage(sender, YELLOW, world.getName() + " " + ENABLED_WARNING_MESSAGE);
 				return;
 			}
 		}
 
 		PreGenerationTask task = new PreGenerationTask();
 		task.parallelTasksMultiplier = parallelTasksMultiplier;
-		task.timeUnit = timeUnit;
+		task.timeUnit  = timeUnit;
 		task.timeValue = timeValue;
 		task.printTime = printTime;
-		task.world = world;
-		task.radius = radius;
-		task.enabled = true;
-		task.worldId = worldId;
+		task.world     = world;
+		task.radius    = radius;
+		task.enabled   = true;
+		task.worldId   = worldId;
 
-		// Determine task queue timer based on environment
 		task_queue_timer = PluginSettings.getTaskQueueTimer(world.getName());
 
 		synchronized (tasks) {
@@ -88,23 +89,21 @@ public class PreGenerator implements Listener {
 		load.state(plugin, task);
 		initializeSchedulers(task);
 
-		// Initialize and schedule the cleanup scheduler for playerLoadedChunks.
 		task.cleanupScheduler = new AsyncDelayedScheduler();
 		task.cleanupScheduler.scheduleAtFixedRate(
 				() -> {
-					// If no players are in the task's world, clear the set.
 					if (task.world.getPlayers().isEmpty()) {
 						task.playerLoadedChunks.clear();
 					}
 				},
-				60000,  // initial delay: 60 seconds
-				60000,  // period: 60 seconds
+				60_000,  // initial delay: 60s
+				60_000,  // period: 60s
 				TimeUnit.MILLISECONDS,
 				task.cleanupScheduler.isEnabledSupplier()
 				);
 
 		if (task.totalChunksProcessed.sum() >= radius) {
-			logColor(YELLOW, world.getName() + " " + RADIUS_EXCEEDED_MESSAGE);
+			colorMessage(sender, YELLOW, world.getName() + " " + RADIUS_EXCEEDED_MESSAGE);
 			terminate(task);
 			return;
 		}
@@ -114,25 +113,21 @@ public class PreGenerator implements Listener {
 	}
 
 	private void initializeSchedulers(PreGenerationTask task) {
-		task.printScheduler = new AsyncDelayedScheduler();
+		task.printScheduler      = new AsyncDelayedScheduler();
 		task.taskSubmitScheduler = new AsyncDelayedScheduler();
 	}
 
 	/**
 	 * Disables the pre-generator for a specific world.
 	 */
-	public synchronized void disable(World world) {
+	public synchronized void disable(CommandSender sender, World world) {
 		int worldId = WorldIdManager.getWorldId(world);
 		PreGenerationTask task;
 
 		synchronized (tasks) {
 			task = tasks.get(worldId);
-			if (task == null) {
-				logColor(YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
-				return;
-			}
-			if (!task.enabled) {
-				logColor(YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
+			if (task == null || !task.enabled) {
+				colorMessage(sender, YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
 				tasks.remove(worldId);
 				return;
 			}
@@ -141,7 +136,6 @@ public class PreGenerator implements Listener {
 
 		terminate(task);
 
-		// Only unregister the global player event listener if there are no tasks remaining.
 		if (tasks.isEmpty()) {
 			HandlerList.unregisterAll(playerEvents);
 		}

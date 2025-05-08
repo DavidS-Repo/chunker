@@ -66,7 +66,7 @@ public class ServerStateManager implements Listener {
 		// reset rules and stop pregeneration when someone joins
 		scheduleImmediate(() -> {
 			resetGameRules();
-			commands.handlePreGenOffCommand(Bukkit.getConsoleSender(), new String[0]);
+			commands.handleDisableCommand(Bukkit.getConsoleSender(), new String[0]);
 			optimizationDone = false;
 		});
 	}
@@ -87,7 +87,7 @@ public class ServerStateManager implements Listener {
 			logColor(WHITE, "No players online, optimizing server");
 			setPerformanceGameRules();
 			unloadAllChunks();
-			commands.checkAndRunAutoPreGenerators();
+			commands.checkAndRunAutoPreGenerators(Bukkit.getConsoleSender());
 			optimizationDone = true;
 		});
 	}

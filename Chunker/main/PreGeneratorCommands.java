@@ -19,49 +19,52 @@ import static main.ConsoleColorUtils.*;
  * Handles the /pregen and /pregenoff commands for chunk pre-generation.
  */
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
-	private final PreGenerator preGen;
-	private long currentBorderChunkCount;
-	private int delayValue;
-	private long radiusValue;
-	private char delayTimeUnit;
+	private final PreGenerator preGenerator;
+	private long currentBorderChunks;
+	private int delayAmount;
+	private long radiusAmount;
+	private char delayUnit;
 	private char radiusUnit;
+
 	private static final int TICKS_PER_SECOND = 20;
 	private static final int TICKS_PER_MINUTE = TICKS_PER_SECOND * 60;
 	private static final int TICKS_PER_HOUR   = TICKS_PER_MINUTE * 60;
-	private final Set<String> generatingWorlds = new HashSet<>();
-	private static final String INVALID_INPUT  = "Invalid numbers provided.";
-	private static final String COMMAND_USAGE  = 
-			"Usage: /pregen <threads> <delay[s/m/h]> <world> <radius[b/c/r]|default>";
 
-	/**
-	 * @param preGen   the pregenerator instance
-	 * @param settings unused for now
-	 */
-	public PreGeneratorCommands(PreGenerator preGen, PluginSettings settings) {
-		this.preGen = preGen;
+	// keep track of which worlds have active pre-gen
+	private final Set<String> activePreGenWorlds = new HashSet<>();
+
+	private static final String INVALID_INPUT = "Invalid numbers provided.";
+	private static final String COMMAND_USAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>";
+	private static final String ENABLED_WARNING = "pre-generator is already enabled.";
+	private static final String DISABLED_WARNING = "pre-generator is already disabled.";
+
+	public PreGeneratorCommands(PreGenerator preGenerator, PluginSettings settings) {
+		this.preGenerator = preGenerator;
 	}
 
 	@Override
 	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
 		if (label.equalsIgnoreCase("pregen")) {
 			if (args.length == 4) {
-				handlePreGenCommand(sender, args);
+				handleEnableCommand(sender, args);
 			} else {
 				colorMessage(sender, RED, COMMAND_USAGE);
 			}
 			return true;
 		}
+
 		if (label.equalsIgnoreCase("pregenoff")) {
-			handlePreGenOffCommand(sender, args);
+			handleDisableCommand(sender, args);
 			return true;
 		}
+
 		return false;
 	}
 
 	/**
-	 * Starts pre-generation for a single world.
+	 * Parses args and turns on pre-gen for a single world.
 	 */
-	private void handlePreGenCommand(CommandSender sender, String[] args) {
+	private void handleEnableCommand(CommandSender sender, String[] args) {
 		try {
 			int threadCount = Integer.parseInt(args[0]);
 			int printTicks  = parseDelay(args[1]);
@@ -71,74 +74,106 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			}
 
 			String worldName = args[2];
-			World world = Bukkit.getWorld(worldName);
-			if (world == null) {
-				sender.sendMessage("World '" + worldName + "' not loaded. Loading now...");
-				world = new WorldCreator(worldName).createWorld();
-				if (world != null) {
-					sender.sendMessage("World '" + worldName + "' loaded.");
-				}
-			}
-			if (world == null) {
-				sender.sendMessage("World not found: " + worldName);
+
+			// if it’s already enabled, warn once and bail
+			if (activePreGenWorlds.contains(worldName)) {
+				colorMessage(sender, YELLOW, worldName + " " + ENABLED_WARNING);
 				return;
 			}
 
-			currentBorderChunkCount = calculateChunksInBorder(world);
+			World world = Bukkit.getWorld(worldName);
+			if (world == null) {
+				colorMessage(sender, GOLD, "World '" + worldName + "' not loaded. Loading now...");
+				world = new WorldCreator(worldName).createWorld();
+				if (world != null) {
+					colorMessage(sender, GOLD, "World '" + worldName + "' loaded.");
+				}
+			}
+			if (world == null) {
+				colorMessage(sender, RED, "World not found: " + worldName);
+				return;
+			}
+
+			currentBorderChunks = calculateChunksInBorder(world);
+
 			long chunks = parseRadius(args[3]);
 			if (chunks < 0) {
 				colorMessage(sender, RED, INVALID_INPUT);
 				return;
 			}
 
-			preGen.enable(
+			preGenerator.enable(
+					sender,
 					threadCount,
-					delayTimeUnit, delayValue,
+					delayUnit, delayAmount,
 					printTicks,
 					world,
 					chunks
 					);
-			generatingWorlds.add(worldName);
+			activePreGenWorlds.add(worldName);
+
+			colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
 
 		} catch (NumberFormatException e) {
 			colorMessage(sender, RED, INVALID_INPUT);
 		}
 	}
 
+
 	/**
-	 * Stops pre-generation for one world or all worlds.
+	 * Turns off pre-gen for one world or all worlds.
 	 */
-	public void handlePreGenOffCommand(CommandSender sender, String[] args) {
+	public void handleDisableCommand(CommandSender sender, String[] args) {
+		// global off
 		if (args.length == 0) {
-			for (String name : generatingWorlds) {
-				preGen.disable(Bukkit.getWorld(name));
+			if (activePreGenWorlds.isEmpty()) {
+				colorMessage(sender, YELLOW, DISABLED_WARNING);
+				return;
 			}
-			generatingWorlds.clear();
+			for (String worldName : activePreGenWorlds) {
+				World w = Bukkit.getWorld(worldName);
+				if (w != null) {
+					preGenerator.disable(sender, w);
+				}
+			}
+			activePreGenWorlds.clear();
+			colorMessage(sender, RED, "pregeneration disabled for all worlds");
+
+			// single-world off
 		} else if (args.length == 1) {
 			String worldName = args[0];
+
+			// already disabled?
+			if (!activePreGenWorlds.contains(worldName)) {
+				colorMessage(sender, YELLOW, worldName + " " + DISABLED_WARNING);
+				return;
+			}
+
 			World world = Bukkit.getWorld(worldName);
 			if (world == null) {
 				colorMessage(sender, RED, "World not found: " + worldName);
 				return;
 			}
-			preGen.disable(world);
-			generatingWorlds.remove(worldName);
+			preGenerator.disable(sender, world);
+			activePreGenWorlds.remove(worldName);
+			colorMessage(sender, RED, "pregeneration disabled for " + worldName);
+
 		} else {
 			colorMessage(sender, RED, "Usage: /pregenoff [world]");
 		}
 	}
 
 	/**
-	 * Converts a delay string (5s, 2m, 1h) into server ticks.
+	 * Converts a delay string (like "5s", "2m", "1h") into server ticks.
 	 */
 	private int parseDelay(String input) {
 		try {
-			delayValue   = Integer.parseInt(input.substring(0, input.length() - 1));
-			delayTimeUnit = Character.toLowerCase(input.charAt(input.length() - 1));
-			switch (delayTimeUnit) {
-			case 's': return delayValue * TICKS_PER_SECOND;
-			case 'm': return delayValue * TICKS_PER_MINUTE;
-			case 'h': return delayValue * TICKS_PER_HOUR;
+			delayAmount = Integer.parseInt(input.substring(0, input.length() - 1));
+			delayUnit   = Character.toLowerCase(input.charAt(input.length() - 1));
+			switch (delayUnit) {
+			case 's': return delayAmount * TICKS_PER_SECOND;
+			case 'm': return delayAmount * TICKS_PER_MINUTE;
+			case 'h': return delayAmount * TICKS_PER_HOUR;
 			default:  return -1;
 			}
 		} catch (Exception e) {
@@ -147,24 +182,23 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Converts a radius argument (b, c, r, or default) into chunk count.
+	 * Converts a radius arg ("default", "10b", "5c", "2r") into a chunk count.
 	 */
 	private long parseRadius(String input) {
 		try {
 			if (input.equalsIgnoreCase("default")) {
-				return currentBorderChunkCount;
+				return currentBorderChunks;
 			}
-			radiusValue = Long.parseLong(input.substring(0, input.length() - 1));
-			radiusUnit  = Character.toLowerCase(input.charAt(input.length() - 1));
+			radiusAmount = Long.parseLong(input.substring(0, input.length() - 1));
+			radiusUnit   = Character.toLowerCase(input.charAt(input.length() - 1));
 			switch (radiusUnit) {
-			case 'b': // blocks
-				long blocks = radiusValue;
-				long sideChunks = blocks / 16;
+			case 'b': // blocks -> chunks^2
+				long sideChunks = radiusAmount / 16;
 				return sideChunks * sideChunks;
-			case 'c': // chunks
-				return radiusValue * radiusValue;
-			case 'r': // regions (32 chunks)
-				long side = radiusValue * 32;
+			case 'c': // chunks -> chunks^2
+				return radiusAmount * radiusAmount;
+			case 'r': // regions (32 chunks) -> (32n)^2
+				long side = radiusAmount * 32;
 				return side * side;
 			default:
 				return -1;
@@ -175,23 +209,22 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Auto-loads and starts pre-generation for any worlds with auto_run=true.
+	 * Auto-loads and kicks off pre-gen for any worlds with auto_run=true.
+	 * Now takes a sender so messages go to console or player correctly.
 	 */
-	public void checkAndRunAutoPreGenerators() {
-		for (String name : getAllWorldNames()) {
-			if (PluginSettings.getAutoRun(name) && Bukkit.getWorld(name) == null) {
-				Bukkit.getConsoleSender().sendMessage(
-						"Loading world '" + name + "' for auto pregeneration..."
-						);
-				new WorldCreator(name).createWorld();
+	public void checkAndRunAutoPreGenerators(CommandSender sender) {
+		for (String worldName : getAllWorldNames()) {
+			if (PluginSettings.getAutoRun(worldName) && Bukkit.getWorld(worldName) == null) {
+				colorMessage(sender, GREEN, "Loading world '" + worldName + "' for auto pregeneration...");
+				new WorldCreator(worldName).createWorld();
 			}
 		}
 
 		int totalCores = PluginSettings.getAvailableProcessors();
-		int autoCount = 0;
+		int autoCount  = 0;
 		Map<String, Integer> coresByWorld = new HashMap<>();
 
-		// allocate fixed cores, count the auto ones
+		// collect fixed cores
 		for (String name : getAllWorldNames()) {
 			if (!PluginSettings.getAutoRun(name)) continue;
 			String mult = PluginSettings.getParallelTasksMultiplier(name);
@@ -204,7 +237,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			}
 		}
 
-		// split remaining cores among auto worlds
+		// split remaining cores
 		int coresPerAuto = autoCount > 0 ? totalCores / autoCount : 0;
 		for (String name : getAllWorldNames()) {
 			if (PluginSettings.getAutoRun(name)
@@ -219,33 +252,38 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		// kick off each world
 		for (Map.Entry<String, Integer> entry : coresByWorld.entrySet()) {
 			if (!noPlayers) break;
-			String name = entry.getKey();
-			World world = Bukkit.getWorld(name);
+			String worldName = entry.getKey();
+			World world = Bukkit.getWorld(worldName);
 			if (world == null) continue;
 
-			currentBorderChunkCount = calculateChunksInBorder(world);
-			int printTicks = parseDelay(PluginSettings.getPrintUpdateDelay(name));
-			long chunks    = parseRadius(PluginSettings.getRadius(name));
+			// recalc border and radius
+			currentBorderChunks = calculateChunksInBorder(world);
+			int printTicks      = parseDelay(PluginSettings.getPrintUpdateDelay(worldName));
+			long chunks         = parseRadius(PluginSettings.getRadius(worldName));
 
-			preGen.enable(
+			preGenerator.enable(
+					sender,
 					entry.getValue(),
-					delayTimeUnit, delayValue,
+					delayUnit, delayAmount,
 					printTicks,
 					world,
 					chunks
 					);
-			generatingWorlds.add(name);
+			activePreGenWorlds.add(worldName);
+
+			// let console/player know we kicked it off
+			colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
 		}
 	}
 
 	/**
-	 * Calculates chunk count inside the world border.
+	 * Calculate how many chunks fit inside the world border.
 	 */
 	public long calculateChunksInBorder(World world) {
 		WorldBorder border = world.getWorldBorder();
-		double diameter     = border.getSize();
-		double halfBlocks   = diameter / 2.0;
-		double halfChunks   = Math.ceil(halfBlocks / 16.0);
+		double diameter   = border.getSize();
+		double halfBlocks = diameter / 2.0;
+		double halfChunks = Math.ceil(halfBlocks / 16.0);
 		return (long) Math.pow(halfChunks * 2 + 1, 2);
 	}
 
@@ -257,29 +295,19 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			String[] args
 			) {
 		if (command.getName().equalsIgnoreCase("pregen")) {
-			if (args.length == 1) {
-				return Collections.singletonList("<ParallelTasksMultiplier>");
-			}
-			if (args.length == 2) {
-				return Collections.singletonList("<PrintUpdateDelayin(Seconds/Minutes/Hours)>");
-			}
-			if (args.length == 3) {
-				return getAllWorldNames();
-			}
-			if (args.length == 4) {
-				return Arrays.asList("<Radius(Blocks/Chunks/Regions)>", "default");
-			}
+			if (args.length == 1) return Collections.singletonList("<ParallelTasksMultiplier>");
+			if (args.length == 2) return Collections.singletonList("<PrintUpdateDelayin(Seconds/Minutes/Hours)>");
+			if (args.length == 3) return getAllWorldNames();
+			if (args.length == 4) return Arrays.asList("<Radius(Blocks/Chunks/Regions)>", "default");
 		}
 		if (command.getName().equalsIgnoreCase("pregenoff")) {
-			if (args.length == 1) {
-				return getAllWorldNames();
-			}
+			if (args.length == 1) return getAllWorldNames();
 		}
 		return Collections.emptyList();
 	}
 
 	/**
-	 * Finds every folder with a level.dat and returns its name.
+	 * Scans the plugin folder for world folders (level.dat present).
 	 */
 	private List<String> getAllWorldNames() {
 		File container = Bukkit.getServer().getWorldContainer();
@@ -296,16 +324,10 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Registers the commands with Bukkit.
+	 * Registers the /pregen and /pregenoff commands.
 	 */
-	public static void registerCommands(
-			JavaPlugin plugin,
-			PreGenerator preGen
-			) {
-		PreGeneratorCommands cmds = new PreGeneratorCommands(
-				preGen,
-				new PluginSettings(plugin)
-				);
+	public static void registerCommands(JavaPlugin plugin, PreGenerator preGen) {
+		PreGeneratorCommands cmds = new PreGeneratorCommands(preGen, new PluginSettings(plugin));
 		plugin.getCommand("pregen").setExecutor(cmds);
 		plugin.getCommand("pregen").setTabCompleter(cmds);
 		plugin.getCommand("pregenoff").setExecutor(cmds);
