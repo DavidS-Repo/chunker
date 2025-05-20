@@ -12,14 +12,14 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.util.*;
-
 import static main.ConsoleColorUtils.*;
 
 /**
- * Handles the /pregen and /pregenoff commands for chunk pre-generation.
+ * Handles the /pregen, /pregenoff and /chunker reset [world] commands for chunk pre-generation.
  */
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private final PreGenerator preGenerator;
+	private final JavaPlugin plugin; // Needed for data folder/location
 	private long currentBorderChunks;
 	private int delayAmount;
 	private long radiusAmount;
@@ -38,17 +38,34 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private static final String ENABLED_WARNING = "pre-generator is already enabled.";
 	private static final String DISABLED_WARNING = "pre-generator is already disabled.";
 
-	public PreGeneratorCommands(PreGenerator preGenerator, PluginSettings settings) {
+	public PreGeneratorCommands(PreGenerator preGenerator, PluginSettings settings, JavaPlugin plugin) {
 		this.preGenerator = preGenerator;
+		this.plugin = plugin;
 	}
 
 	@Override
 	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-		if (label.equalsIgnoreCase("pregen")) {
+		// ----- /pregen reset [world] -----
+		if (cmd.getName().equalsIgnoreCase("pregen")) {
+			if (args.length == 2 && args[0].equalsIgnoreCase("reset")) {
+				if (!sender.hasPermission("chunker.reset")) {
+					colorMessage(sender, RED, "You do not have permission to reset pre-generation data.");
+					return true;
+				}
+				String world = args[1];
+				boolean result = ResetPreGenState.reset(plugin, world);
+				if (result) {
+					colorMessage(sender, GREEN, "Pregeneration data reset for world: " + world);
+				} else {
+					colorMessage(sender, RED, "No pregeneration data found for: " + world);
+				}
+				return true;
+			}
+			// ----- normal pregen -----
 			if (args.length == 4) {
 				handleEnableCommand(sender, args);
 			} else {
-				colorMessage(sender, RED, COMMAND_USAGE);
+				colorMessage(sender, RED, COMMAND_USAGE + "\n/pregen reset <world>");
 			}
 			return true;
 		}
@@ -72,15 +89,11 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				colorMessage(sender, RED, INVALID_INPUT);
 				return;
 			}
-
 			String worldName = args[2];
-
-			// if it’s already enabled, warn once and bail
 			if (activePreGenWorlds.contains(worldName)) {
 				colorMessage(sender, YELLOW, worldName + " " + ENABLED_WARNING);
 				return;
 			}
-
 			World world = Bukkit.getWorld(worldName);
 			if (world == null) {
 				colorMessage(sender, GOLD, "World '" + worldName + "' not loaded. Loading now...");
@@ -93,7 +106,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				colorMessage(sender, RED, "World not found: " + worldName);
 				return;
 			}
-
 			currentBorderChunks = calculateChunksInBorder(world);
 
 			long chunks = parseRadius(args[3]);
@@ -111,14 +123,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					chunks
 					);
 			activePreGenWorlds.add(worldName);
-
 			colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
 
 		} catch (NumberFormatException e) {
 			colorMessage(sender, RED, INVALID_INPUT);
 		}
 	}
-
 
 	/**
 	 * Turns off pre-gen for one world or all worlds.
@@ -142,13 +152,10 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			// single-world off
 		} else if (args.length == 1) {
 			String worldName = args[0];
-
-			// already disabled?
 			if (!activePreGenWorlds.contains(worldName)) {
 				colorMessage(sender, YELLOW, worldName + " " + DISABLED_WARNING);
 				return;
 			}
-
 			World world = Bukkit.getWorld(worldName);
 			if (world == null) {
 				colorMessage(sender, RED, "World not found: " + worldName);
@@ -219,7 +226,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				new WorldCreator(worldName).createWorld();
 			}
 		}
-
 		int totalCores = PluginSettings.getAvailableProcessors();
 		int autoCount  = 0;
 		Map<String, Integer> coresByWorld = new HashMap<>();
@@ -236,7 +242,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				autoCount++;
 			}
 		}
-
 		// split remaining cores
 		int coresPerAuto = autoCount > 0 ? totalCores / autoCount : 0;
 		for (String name : getAllWorldNames()) {
@@ -245,7 +250,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				coresByWorld.put(name, coresPerAuto);
 			}
 		}
-
 		if (coresByWorld.isEmpty()) return;
 		boolean noPlayers = Bukkit.getOnlinePlayers().isEmpty();
 
@@ -271,7 +275,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					);
 			activePreGenWorlds.add(worldName);
 
-			// let console/player know we kicked it off
 			colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
 		}
 	}
@@ -295,7 +298,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			String[] args
 			) {
 		if (command.getName().equalsIgnoreCase("pregen")) {
-			if (args.length == 1) return Collections.singletonList("<ParallelTasksMultiplier>");
+			if (args.length == 1) {
+				return Arrays.asList("<ParallelTasksMultiplier>", "reset");
+			}
+			if (args.length == 2 && args[0].equalsIgnoreCase("reset")) {
+				return getPregeneratorWorlds(plugin); // worlds with data file
+			}
 			if (args.length == 2) return Collections.singletonList("<PrintUpdateDelayin(Seconds/Minutes/Hours)>");
 			if (args.length == 3) return getAllWorldNames();
 			if (args.length == 4) return Arrays.asList("<Radius(Blocks/Chunks/Regions)>", "default");
@@ -324,10 +332,30 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Registers the /pregen and /pregenoff commands.
+	 * Scans the plugin's data folder for pregenerator data files and returns corresponding world names.
+	 *
+	 * @param plugin the JavaPlugin instance
+	 * @return a list of world names that have pregenerator data
+	 */
+	private List<String> getPregeneratorWorlds(JavaPlugin plugin) {
+		File dataFolder = plugin.getDataFolder();
+		File[] files = dataFolder.listFiles((dir, name) -> name.endsWith("_pregenerator.txt"));
+		if (files == null) return Collections.emptyList();
+		List<String> result = new ArrayList<>();
+		for (File f : files) {
+			String n = f.getName();
+			if (n.endsWith("_pregenerator.txt")) {
+				result.add(n.substring(0, n.length() - "_pregenerator.txt".length()));
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Registers the commands (/pregen, /pregenoff, /chunker) with the plugin.
 	 */
 	public static void registerCommands(JavaPlugin plugin, PreGenerator preGen) {
-		PreGeneratorCommands cmds = new PreGeneratorCommands(preGen, new PluginSettings(plugin));
+		PreGeneratorCommands cmds = new PreGeneratorCommands(preGen, new PluginSettings(plugin), plugin);
 		plugin.getCommand("pregen").setExecutor(cmds);
 		plugin.getCommand("pregen").setTabCompleter(cmds);
 		plugin.getCommand("pregenoff").setExecutor(cmds);

@@ -10,6 +10,7 @@ public class Chunker extends JavaPlugin implements Listener {
 	public void onEnable() {
 		getServer().getPluginManager().registerEvents(this, this);
 		settings = new PluginSettings(this);
+
 		PreGenerator preGenerator;
 		try {
 			preGenerator = new PreGenerator(this);
@@ -20,10 +21,13 @@ public class Chunker extends JavaPlugin implements Listener {
 			return;
 		}
 		getServer().getPluginManager().registerEvents(preGenerator, this);
-		PreGeneratorCommands preGeneratorCommands = new PreGeneratorCommands(preGenerator, settings);
+
+		PreGeneratorCommands preGeneratorCommands = new PreGeneratorCommands(preGenerator, settings, this);
 		getCommand("pregen").setExecutor(preGeneratorCommands);
 		getCommand("pregen").setTabCompleter(preGeneratorCommands);
 		getCommand("pregenoff").setExecutor(preGeneratorCommands);
+		getCommand("pregenoff").setTabCompleter(preGeneratorCommands);
+
 		new ServerStateManager(this, preGeneratorCommands);
 	}
 }
