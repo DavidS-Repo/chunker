@@ -189,7 +189,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Converts a radius arg ("default", "10b", "5c", "2r") into a chunk count.
+	 * Converts radius input to total chunk count, rounding up to cover full regions from center.
 	 */
 	private long parseRadius(String input) {
 		try {
@@ -199,14 +199,21 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			radiusAmount = Long.parseLong(input.substring(0, input.length() - 1));
 			radiusUnit   = Character.toLowerCase(input.charAt(input.length() - 1));
 			switch (radiusUnit) {
-			case 'b': // blocks -> chunks^2
-				long sideChunks = radiusAmount / 16;
-				return sideChunks * sideChunks;
-			case 'c': // chunks -> chunks^2
-				return radiusAmount * radiusAmount;
-			case 'r': // regions (32 chunks) -> (32n)^2
-				long side = radiusAmount * 32;
-				return side * side;
+			case 'b': // blocks radius
+				// regions are 512 blocks, multiply by 2 for side length, round up to nearest region
+				long neededRegionsB = (long) Math.ceil((radiusAmount * 2) / 512.0);
+				long sideChunksB = neededRegionsB * 32; // 32 chunks per region
+				return sideChunksB * sideChunksB;
+			case 'c': // chunks radius
+				// regions are 32 chunks, multiply by 2 for side length, round up to nearest region
+				long neededRegionsC = (long) Math.ceil((radiusAmount * 2) / 32.0);
+				long sideChunksC = neededRegionsC * 32;
+				return sideChunksC * sideChunksC;
+			case 'r': // region radius
+				// regions radius, so just round up to nearest whole region on each side (if needed)
+				long sideRegions = (long) Math.ceil(radiusAmount * 2);
+				long sideChunksR = sideRegions * 32;
+				return sideChunksR * sideChunksR;
 			default:
 				return -1;
 			}
