@@ -1,11 +1,14 @@
-# Chunker
+# Chunker - Official Support & Downloads
+
+Join our **Discord Community** for help, support, issues, feedback, and discussions!
+Click here to join: **[Join Our Discord](https://discord.gg/FUx7fk4PsA)**
 
 #### Supported MC Versions:
 - Minecraft 1.20.5+  
-- **Requires Java 21 or higher**
+- Requires Java 21 or higher
 
 #### Supported Servers:
-- Spigot, Bukkit, Paper, Pufferfish, Purpur, Folia
+- Spigot, Bukkit, Paper, Pufferfish, Purpur, Leaf, and Folia
 
 <div style="display: flex; justify-content: space-between; width: 100% !important;">
     <img src="https://www.davids-repo.dev/mc/chunker1.png" style="width: 49% !important; height: auto;">
@@ -186,3 +189,4 @@ world_the_end:
 1. Begin with `parallel_tasks_multiplier = 1`, then adjust.
 2. Async loading (Paper and Folia) = much better performance.
 3. Use `print_update_delay` of 10s+ to avoid excessive log output during long runs.
+
