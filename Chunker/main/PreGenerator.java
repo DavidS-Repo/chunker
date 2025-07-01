@@ -120,14 +120,16 @@ public class PreGenerator implements Listener {
 	/**
 	 * Disables the pre-generator for a specific world.
 	 */
-	public synchronized void disable(CommandSender sender, World world) {
+	public synchronized void disable(CommandSender sender, World world, boolean showMessages) {
 		int worldId = WorldIdManager.getWorldId(world);
 		PreGenerationTask task;
 
 		synchronized (tasks) {
 			task = tasks.get(worldId);
 			if (task == null || !task.enabled) {
-				colorMessage(sender, YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
+				if (showMessages) {
+					colorMessage(sender, YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
+				}
 				tasks.remove(worldId);
 				return;
 			}

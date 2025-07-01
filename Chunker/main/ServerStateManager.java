@@ -63,12 +63,18 @@ public class ServerStateManager implements Listener {
 
 	@EventHandler
 	public void onPlayerJoin(PlayerJoinEvent event) {
-		// reset rules and stop pregeneration when someone joins
-		scheduleImmediate(() -> {
-			resetGameRules();
-			commands.handleDisableCommand(Bukkit.getConsoleSender(), new String[0]);
-			optimizationDone = false;
-		});
+	    scheduleImmediate(() -> {
+	        resetGameRules();
+	        // Silent auto-disable for all active pregen worlds
+	        for (String worldName : commands.getActivePreGenWorlds()) {
+	            World w = Bukkit.getWorld(worldName);
+	            if (w != null) {
+	                commands.getPreGenerator().disable(Bukkit.getConsoleSender(), w, false);
+	            }
+	        }
+	        commands.clearActivePreGenWorlds();
+	        optimizationDone = false;
+	    });
 	}
 
 	@EventHandler

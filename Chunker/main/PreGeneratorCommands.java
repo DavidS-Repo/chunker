@@ -143,13 +143,11 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			for (String worldName : activePreGenWorlds) {
 				World w = Bukkit.getWorld(worldName);
 				if (w != null) {
-					preGenerator.disable(sender, w);
+					preGenerator.disable(sender, w, true);
 				}
 			}
 			activePreGenWorlds.clear();
 			colorMessage(sender, RED, "pregeneration disabled for all worlds");
-
-			// single-world off
 		} else if (args.length == 1) {
 			String worldName = args[0];
 			if (!activePreGenWorlds.contains(worldName)) {
@@ -161,13 +159,33 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				colorMessage(sender, RED, "World not found: " + worldName);
 				return;
 			}
-			preGenerator.disable(sender, world);
+			preGenerator.disable(sender, world, true);
 			activePreGenWorlds.remove(worldName);
 			colorMessage(sender, RED, "pregeneration disabled for " + worldName);
-
 		} else {
 			colorMessage(sender, RED, "Usage: /pregenoff [world]");
 		}
+	}
+	
+	/**
+	 * Gets the set of worlds currently running pre-generation.
+	 */
+	public Set<String> getActivePreGenWorlds() {
+	    return activePreGenWorlds;
+	}
+
+	/**
+	 * Clears the set of active pre-generation worlds.
+	 */
+	public void clearActivePreGenWorlds() {
+	    activePreGenWorlds.clear();
+	}
+
+	/**
+	 * Gets the PreGenerator instance for direct control.
+	 */
+	public PreGenerator getPreGenerator() {
+	    return preGenerator;
 	}
 
 	/**
