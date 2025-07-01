@@ -114,7 +114,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				return;
 			}
 
-			preGenerator.enable(
+			boolean started = preGenerator.enable(
 					sender,
 					threadCount,
 					delayUnit, delayAmount,
@@ -122,8 +122,11 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					world,
 					chunks
 					);
-			activePreGenWorlds.add(worldName);
-			colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
+			if (started) {
+				activePreGenWorlds.add(worldName);
+				colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
+			}
+			// If not started, enable() already gave a radius/exceeded or "already enabled" warning.
 
 		} catch (NumberFormatException e) {
 			colorMessage(sender, RED, INVALID_INPUT);
@@ -166,26 +169,26 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			colorMessage(sender, RED, "Usage: /pregenoff [world]");
 		}
 	}
-	
+
 	/**
 	 * Gets the set of worlds currently running pre-generation.
 	 */
 	public Set<String> getActivePreGenWorlds() {
-	    return activePreGenWorlds;
+		return activePreGenWorlds;
 	}
 
 	/**
 	 * Clears the set of active pre-generation worlds.
 	 */
 	public void clearActivePreGenWorlds() {
-	    activePreGenWorlds.clear();
+		activePreGenWorlds.clear();
 	}
 
 	/**
 	 * Gets the PreGenerator instance for direct control.
 	 */
 	public PreGenerator getPreGenerator() {
-	    return preGenerator;
+		return preGenerator;
 	}
 
 	/**

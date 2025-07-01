@@ -53,7 +53,7 @@ public class PreGenerator implements Listener {
 	/**
 	 * Enables the pre-generator for a specific world.
 	 */
-	public synchronized void enable(CommandSender sender,
+	public synchronized boolean enable(CommandSender sender,
 			int parallelTasksMultiplier,
 			char timeUnit,
 			int timeValue,
@@ -65,7 +65,7 @@ public class PreGenerator implements Listener {
 		synchronized (tasks) {
 			if (tasks.containsKey(worldId)) {
 				colorMessage(sender, YELLOW, world.getName() + " " + ENABLED_WARNING_MESSAGE);
-				return;
+				return false;
 			}
 		}
 
@@ -105,11 +105,12 @@ public class PreGenerator implements Listener {
 		if (task.totalChunksProcessed.sum() >= radius) {
 			colorMessage(sender, YELLOW, world.getName() + " " + RADIUS_EXCEEDED_MESSAGE);
 			terminate(task);
-			return;
+			return false;
 		}
 
 		startGeneration(task);
 		print.start(task);
+		return true;
 	}
 
 	private void initializeSchedulers(PreGenerationTask task) {
