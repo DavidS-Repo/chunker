@@ -2,6 +2,7 @@ package main;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
@@ -37,12 +38,16 @@ public class PreGenerator implements Listener {
 	// Detect Paper and Folia at runtime
 	private static final boolean IS_PAPER = detectPaper();
 	private static final boolean IS_FOLIA = detectFolia();
+	private static final boolean REQUIRES_CHUNK_SAFETY = ServerVersion.getInstance().requiresChunkSafety();
 
 	private long task_queue_timer;
 
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
 		logPlain("Available Processors: " + PluginSettings.getAvailableProcessors());
+		if (IS_PAPER && REQUIRES_CHUNK_SAFETY) {
+			logPlain("Server version " + ServerVersion.getInstance().getVersionString() + " detected - using chunk safety measures");
+		}
 		this.playerEvents = new PlayerEvents(tasks);
 		this.load  = new Load();
 		this.save  = new Save();
@@ -201,7 +206,6 @@ public class PreGenerator implements Listener {
 								task.taskSubmitScheduler.setEnabled(false);
 								return;
 							}
-							// Restore saving after region completion
 							if (nextChunkResult.regionCompleted) {
 								saveTaskState(task);
 							}
@@ -230,7 +234,6 @@ public class PreGenerator implements Listener {
 								saveTaskState(task);
 								return;
 							}
-							// Restore saving after region completion
 							if (nextChunkResult.regionCompleted) {
 								saveTaskState(task);
 							}
@@ -302,11 +305,15 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Paper: async chunk load then immediate unload.
+	 * Paper: async chunk load with conditional safety measures.
 	 */
 	private void processChunkPaper(PreGenerationTask task, ChunkPos chunkPos) {
 		if (!task.enabled) return;
-		getChunkAsync(task, chunkPos, true);
+		if (REQUIRES_CHUNK_SAFETY) {
+			getChunkAsyncWithSafety(task, chunkPos, true);
+		} else {
+			getChunkAsync(task, chunkPos, true);
+		}
 		task.totalChunksProcessed.increment();
 		task.chunksThisCycle++;
 		completionCheck(task);
@@ -354,7 +361,24 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Paper's getChunkAtAsync + immediate unload.
+	 * Paper's getChunkAtAsync with safety measures for affected versions.
+	 */
+	public void getChunkAsyncWithSafety(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
+		if (!task.enabled) return;
+		World world = task.world;
+		Location home = world.getSpawnLocation();
+		Bukkit.getScheduler().runTask(plugin, () -> {
+			ChunkSafety.spawnDummyAndProcess(
+					plugin,
+					world,
+					home,
+					chunkPos
+					);
+		});
+	}
+
+	/**
+	 * Paper's getChunkAtAsync with immediate unload for unaffected versions.
 	 */
 	private void getChunkAsync(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
 		if (!task.enabled) return;
@@ -409,10 +433,8 @@ public class PreGenerator implements Listener {
 			if (!task.enabled) return;
 			Chunk chunk = event.getChunk();
 			if (chunk == null) return;
-			// Use the new factory method instead of the constructor.
 			ChunkPos chunkPos = ChunkPos.get(chunk.getX(), chunk.getZ());
 			if (task.playerLoadedChunks.contains(chunkPos)) {
-				// If a player explicitly loaded it, don't unload.
 				return;
 			}
 			if (!event.isNewChunk()) {
