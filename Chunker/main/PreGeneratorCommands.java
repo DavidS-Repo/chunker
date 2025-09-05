@@ -243,8 +243,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 	}
 
-	// Add this method to PreGeneratorCommands class
-
 	/**
 	 * Auto-loads and kicks off pre-gen for any worlds with auto_run=true.
 	 * Now takes a sender so messages go to console or player correctly.
@@ -254,7 +252,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			colorMessage(sender, YELLOW, "Settings not initialized, skipping auto-pregeneration");
 			return;
 		}
-
+		
 		for (String worldName : getAllWorldNames()) {
 			if (PluginSettings.getAutoRun(worldName) && Bukkit.getWorld(worldName) == null) {
 				colorMessage(sender, GREEN, "Loading world '" + worldName + "' for auto pregeneration...");
@@ -299,19 +297,21 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			String worldName = entry.getKey();
 			World world = Bukkit.getWorld(worldName);
 			if (world == null) continue;
-
-			// recalc border and radius
 			currentBorderChunks = calculateChunksInBorder(world);
+			String radiusConfig = PluginSettings.getRadius(worldName);
+			long chunks = parseRadius(radiusConfig);
+			
+			if (chunks <= 0) {
+				colorMessage(sender, YELLOW, "Invalid radius for " + worldName + " (got " + chunks + " chunks), skipping");
+				continue;
+			}
+			
 			int printTicks = parseDelay(PluginSettings.getPrintUpdateDelay(worldName));
 			if (printTicks <= 0) {
 				colorMessage(sender, YELLOW, "Invalid print_update_delay for " + worldName + ", using 5s");
 				printTicks = 100;
-			}
-
-			long chunks = parseRadius(PluginSettings.getRadius(worldName));
-			if (chunks <= 0) {
-				colorMessage(sender, YELLOW, "Invalid radius for " + worldName + ", skipping");
-				continue;
+				delayUnit = 's';
+				delayAmount = 5;
 			}
 
 			boolean started = preGenerator.enable(
@@ -322,10 +322,10 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					world,
 					chunks
 					);
-
+			
 			if (started) {
 				activePreGenWorlds.add(worldName);
-				colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
+				colorMessage(sender, GREEN, "pregeneration enabled for " + worldName + " with " + chunks + " chunks");
 			}
 		}
 	}
