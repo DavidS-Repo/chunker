@@ -14,7 +14,7 @@ import static main.ConsoleColorUtils.*;
 
 /**
  * Monitors player activity and tweaks server state.
- * When no one’s online it unloads chunks, adjusts game rules,
+ * When no oneâ€™s online it unloads chunks, adjusts game rules,
  * and kicks off any auto pre-generation tasks.
  */
 public class ServerStateManager implements Listener {
@@ -45,7 +45,7 @@ public class ServerStateManager implements Listener {
 
 		// if server starts empty, run optimization immediately
 		if (noPlayersOnline()) {
-			optimizeServer();
+			scheduleDelayed(() -> optimizeServer(), 40L);
 		}
 	}
 
@@ -89,6 +89,11 @@ public class ServerStateManager implements Listener {
 
 	// core optimization steps when no players are online
 	private void optimizeServer() {
+		if (!PluginSettings.isInitialized()) {
+			logColor(YELLOW, "Settings not yet initialized, delaying optimization");
+			scheduleDelayed(() -> optimizeServer(), 20L);
+			return;
+		}
 		scheduleImmediate(() -> {
 			logColor(WHITE, "No players online, optimizing server");
 			setPerformanceGameRules();
