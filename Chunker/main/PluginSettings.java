@@ -14,6 +14,7 @@ public class PluginSettings {
 	private final JavaPlugin plugin;
 	private final CustomConfig configLoader;
 	private static YamlConfiguration config;
+	private static boolean initialized = false;
 
 	/**
 	 * Creates a new PluginSettings handler.
@@ -24,6 +25,16 @@ public class PluginSettings {
 		this.plugin = plugin;
 		this.configLoader = new CustomConfig(plugin, "settings.yml");
 		initConfig();
+		initialized = true;
+	}
+
+	/**
+	 * Checks if settings have been fully initialized.
+	 *
+	 * @return true if settings are loaded and ready
+	 */
+	public static boolean isInitialized() {
+		return initialized && config != null;
 	}
 
 	// ensure data folder and settings.yml exist, then load
@@ -44,6 +55,7 @@ public class PluginSettings {
 				OutputStream out = new FileOutputStream(destFile)) {
 			if (in == null) {
 				plugin.getLogger().severe("Default settings.yml not found in JAR");
+				createEmptyConfig();
 				return;
 			}
 			byte[] buffer = new byte[1024];
@@ -54,14 +66,27 @@ public class PluginSettings {
 		} catch (IOException e) {
 			plugin.getLogger().severe("Failed to extract default settings.yml");
 			e.printStackTrace();
+			createEmptyConfig();
 		}
+	}
+
+	// create empty config if extraction fails
+	private void createEmptyConfig() {
+		config = new YamlConfiguration();
+		populateDefaultsForAllWorlds();
+		saveSettings();
 	}
 
 	// load YAML into memory, apply defaults, then save back
 	private void loadSettings() {
 		String raw = configLoader.loadConfig();
-		config = YamlConfiguration.loadConfiguration(new StringReader(raw));
+		if (raw == null || raw.trim().isEmpty()) {
+			config = new YamlConfiguration();
+		} else {
+			config = YamlConfiguration.loadConfiguration(new StringReader(raw));
+		}
 		populateDefaultsForAllWorlds();
+		config.options().copyDefaults(true);
 		saveSettings();
 	}
 
@@ -84,7 +109,6 @@ public class PluginSettings {
 			config.addDefault(basePath + "print_update_delay", "5s");
 			config.addDefault(basePath + "radius", "default");
 		}
-		config.options().copyDefaults(true);
 	}
 
 	/**
@@ -112,7 +136,8 @@ public class PluginSettings {
 	 * @return whether auto-run is enabled for that world
 	 */
 	public static boolean getAutoRun(String worldName) {
-		return config.getBoolean(worldName + ".auto_run");
+		if (!isInitialized()) return false;
+		return config.getBoolean(worldName + ".auto_run", false);
 	}
 
 	/**
@@ -120,7 +145,8 @@ public class PluginSettings {
 	 * @return configured task queue timer (in ticks)
 	 */
 	public static int getTaskQueueTimer(String worldName) {
-		return (int) config.getLong(worldName + ".task_queue_timer");
+		if (!isInitialized()) return 60;
+		return (int) config.getLong(worldName + ".task_queue_timer", 60);
 	}
 
 	/**
@@ -128,7 +154,8 @@ public class PluginSettings {
 	 * @return configured parallel tasks multiplier ("auto" or number)
 	 */
 	public static String getParallelTasksMultiplier(String worldName) {
-		return config.getString(worldName + ".parallel_tasks_multiplier");
+		if (!isInitialized()) return "auto";
+		return config.getString(worldName + ".parallel_tasks_multiplier", "auto");
 	}
 
 	/**
@@ -136,7 +163,8 @@ public class PluginSettings {
 	 * @return configured print update delay (e.g. "5s")
 	 */
 	public static String getPrintUpdateDelay(String worldName) {
-		return config.getString(worldName + ".print_update_delay");
+		if (!isInitialized()) return "5s";
+		return config.getString(worldName + ".print_update_delay", "5s");
 	}
 
 	/**
@@ -144,6 +172,7 @@ public class PluginSettings {
 	 * @return configured radius ("default" or value like "10c")
 	 */
 	public static String getRadius(String worldName) {
+		if (!isInitialized()) return "default";
 		return config.getString(worldName + ".radius", "default");
 	}
 }
