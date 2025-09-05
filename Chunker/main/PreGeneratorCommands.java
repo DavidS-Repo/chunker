@@ -243,11 +243,18 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 	}
 
+	// Add this method to PreGeneratorCommands class
+
 	/**
 	 * Auto-loads and kicks off pre-gen for any worlds with auto_run=true.
 	 * Now takes a sender so messages go to console or player correctly.
 	 */
 	public void checkAndRunAutoPreGenerators(CommandSender sender) {
+		if (!PluginSettings.isInitialized()) {
+			colorMessage(sender, YELLOW, "Settings not initialized, skipping auto-pregeneration");
+			return;
+		}
+
 		for (String worldName : getAllWorldNames()) {
 			if (PluginSettings.getAutoRun(worldName) && Bukkit.getWorld(worldName) == null) {
 				colorMessage(sender, GREEN, "Loading world '" + worldName + "' for auto pregeneration...");
@@ -263,15 +270,20 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			if (!PluginSettings.getAutoRun(name)) continue;
 			String mult = PluginSettings.getParallelTasksMultiplier(name);
 			if (!"auto".equalsIgnoreCase(mult)) {
-				int c = Integer.parseInt(mult);
-				coresByWorld.put(name, c);
-				totalCores -= c;
+				try {
+					int c = Integer.parseInt(mult);
+					coresByWorld.put(name, c);
+					totalCores -= c;
+				} catch (NumberFormatException e) {
+					colorMessage(sender, YELLOW, "Invalid parallel_tasks_multiplier for " + name + ", using auto");
+					autoCount++;
+				}
 			} else {
 				autoCount++;
 			}
 		}
 		// split remaining cores
-		int coresPerAuto = autoCount > 0 ? totalCores / autoCount : 0;
+		int coresPerAuto = autoCount > 0 ? Math.max(1, totalCores / autoCount) : 0;
 		for (String name : getAllWorldNames()) {
 			if (PluginSettings.getAutoRun(name)
 					&& "auto".equalsIgnoreCase(PluginSettings.getParallelTasksMultiplier(name))) {
@@ -290,10 +302,19 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 
 			// recalc border and radius
 			currentBorderChunks = calculateChunksInBorder(world);
-			int printTicks      = parseDelay(PluginSettings.getPrintUpdateDelay(worldName));
-			long chunks         = parseRadius(PluginSettings.getRadius(worldName));
+			int printTicks = parseDelay(PluginSettings.getPrintUpdateDelay(worldName));
+			if (printTicks <= 0) {
+				colorMessage(sender, YELLOW, "Invalid print_update_delay for " + worldName + ", using 5s");
+				printTicks = 100;
+			}
 
-			preGenerator.enable(
+			long chunks = parseRadius(PluginSettings.getRadius(worldName));
+			if (chunks <= 0) {
+				colorMessage(sender, YELLOW, "Invalid radius for " + worldName + ", skipping");
+				continue;
+			}
+
+			boolean started = preGenerator.enable(
 					sender,
 					entry.getValue(),
 					delayUnit, delayAmount,
@@ -301,9 +322,11 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					world,
 					chunks
 					);
-			activePreGenWorlds.add(worldName);
 
-			colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
+			if (started) {
+				activePreGenWorlds.add(worldName);
+				colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
+			}
 		}
 	}
 
