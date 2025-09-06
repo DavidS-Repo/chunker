@@ -1,4 +1,4 @@
-# Configuration
+# World Configuration for Chunker Plugin
 
 # auto_run: Set to true if you want pre-generation to start automatically when no players are on the server.
 # Acceptable values: true or false
@@ -20,11 +20,10 @@
 
 # radius: Defines how far the pre-generator should run (b-Blocks, c-Chunks, r-Regions) or 'default' to pre-generate until the world border.
 
-# Settings
+# World Settings
 # exampleWorldName:
 #   auto_run: false # Acceptable values: true or false
 #   task_queue_timer: 60 # Acceptable range: positive integer
 #   parallel_tasks_multiplier: auto # 'auto' or a positive integer value
 #   print_update_delay: 5s # Format: [value][s|m|h]. Example: 5s, 2h, 1d
 #   radius: default # Format: [value][b|c|r]. Example: 100b, 1c, 10r, or 'default'
-

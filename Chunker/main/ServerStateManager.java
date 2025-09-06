@@ -10,129 +10,206 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.function.Supplier;
+
 import static main.ConsoleColorUtils.*;
 
 /**
- * Monitors player activity and tweaks server state.
- * When no oneâ€™s online it unloads chunks, adjusts game rules,
- * and kicks off any auto pre-generation tasks.
+ * Monitors player activity and tweaks server state
  */
 public class ServerStateManager implements Listener {
 	private final JavaPlugin plugin;
 	private final PreGeneratorCommands commands;
-	private final boolean foliaDetected;
+	private final TaskScheduler scheduler;
 	private boolean optimizationDone;
 
-	private static final int DEFAULT_SPAWN_CHUNK_RADIUS = 0;
-	private static final int DEFAULT_RANDOM_TICK_SPEED = 3;
-	private static final boolean DEFAULT_MOB_SPAWNING = true;
-	private static final boolean DEFAULT_FIRE_TICK = true;
+	/**
+	 * Abstraction for task scheduling that handles both Folia and standard Bukkit.
+	 */
+	private sealed interface TaskScheduler permits FoliaScheduler, BukkitScheduler {
+		void scheduleDelayed(Runnable task, long delayTicks);
+		void scheduleImmediate(Runnable task);
+
+		static TaskScheduler create(JavaPlugin plugin) {
+			return detectFolia() ? new FoliaScheduler(plugin) : new BukkitScheduler(plugin);
+		}
+
+		private static boolean detectFolia() {
+			try {
+				Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+				logColor(GREEN, "Folia detected, enabling support");
+				return true;
+			} catch (ClassNotFoundException e) {
+				logColor(YELLOW, "Folia not detected, running standard mode");
+				return false;
+			}
+		}
+	}
+
+	private record FoliaScheduler(JavaPlugin plugin) implements TaskScheduler {
+		@Override
+		public void scheduleDelayed(Runnable task, long delayTicks) {
+			plugin.getServer()
+			.getGlobalRegionScheduler()
+			.runDelayed(plugin, t -> task.run(), delayTicks);
+		}
+
+		@Override
+		public void scheduleImmediate(Runnable task) {
+			plugin.getServer().getGlobalRegionScheduler().execute(plugin, task);
+		}
+	}
+
+	private record BukkitScheduler(JavaPlugin plugin) implements TaskScheduler {
+		@Override
+		public void scheduleDelayed(Runnable task, long delayTicks) {
+			Bukkit.getScheduler().runTaskLater(plugin, task, delayTicks);
+		}
+
+		@Override
+		public void scheduleImmediate(Runnable task) {
+			Bukkit.getScheduler().runTask(plugin, task);
+		}
+	}
 
 	/**
-	 * Sets up server state manager.
+	 * Maps plugin GameRule enums to Bukkit GameRule objects with their value getters.
+	 */
+	private enum GameRuleMapping {
+		SPAWN_CHUNK_RADIUS(PluginSettings.GameRule.SPAWN_CHUNK_RADIUS, 
+				() -> GameRule.SPAWN_CHUNK_RADIUS),
+		RANDOM_TICK_SPEED(PluginSettings.GameRule.RANDOM_TICK_SPEED, 
+				() -> GameRule.RANDOM_TICK_SPEED),
+		DO_MOB_SPAWNING(PluginSettings.GameRule.DO_MOB_SPAWNING, 
+				() -> GameRule.DO_MOB_SPAWNING),
+		DO_FIRE_TICK(PluginSettings.GameRule.DO_FIRE_TICK, 
+				() -> GameRule.DO_FIRE_TICK),
+		DO_PATROL_SPAWNING(PluginSettings.GameRule.DO_PATROL_SPAWNING, 
+				() -> GameRule.DO_PATROL_SPAWNING),
+		DO_WARDEN_SPAWNING(PluginSettings.GameRule.DO_WARDEN_SPAWNING, 
+				() -> GameRule.DO_WARDEN_SPAWNING),
+		DO_TRADER_SPAWNING(PluginSettings.GameRule.DO_TRADER_SPAWNING, 
+				() -> GameRule.DO_TRADER_SPAWNING),
+		MAX_ENTITY_CRAMMING(PluginSettings.GameRule.MAX_ENTITY_CRAMMING, 
+				() -> GameRule.MAX_ENTITY_CRAMMING),
+		MOB_GRIEFING(PluginSettings.GameRule.MOB_GRIEFING, 
+				() -> GameRule.MOB_GRIEFING),
+		DO_INSOMNIA(PluginSettings.GameRule.DO_INSOMNIA, 
+				() -> GameRule.DO_INSOMNIA),
+		DO_WEATHER_CYCLE(PluginSettings.GameRule.DO_WEATHER_CYCLE, 
+				() -> GameRule.DO_WEATHER_CYCLE),
+		DO_DAYLIGHT_CYCLE(PluginSettings.GameRule.DO_DAYLIGHT_CYCLE, 
+				() -> GameRule.DO_DAYLIGHT_CYCLE),
+		DO_ENTITY_DROPS(PluginSettings.GameRule.DO_ENTITY_DROPS, 
+				() -> GameRule.DO_ENTITY_DROPS),
+		DO_TILE_DROPS(PluginSettings.GameRule.DO_TILE_DROPS, 
+				() -> GameRule.DO_TILE_DROPS);
+
+		private final PluginSettings.GameRule configRule;
+		private final Supplier<GameRule<?>> bukkitRule;
+
+		GameRuleMapping(PluginSettings.GameRule configRule, Supplier<GameRule<?>> bukkitRule) {
+			this.configRule = configRule;
+			this.bukkitRule = bukkitRule;
+		}
+
+		/**
+		 * Applies optimized or normal values to all worlds based on rule configuration.
+		 */
+		public void applyToAllWorlds(boolean useOptimized) {
+			if (!configRule.isManaged()) return;
+
+			Object value = useOptimized ? configRule.getOptimizedValue() : configRule.getNormalValue();
+
+			for (World world : Bukkit.getWorlds()) {
+				setGameRuleValue(world, bukkitRule.get(), value);
+			}
+		}
+
+		@SuppressWarnings("unchecked")
+		private static <T> void setGameRuleValue(World world, GameRule<T> rule, Object value) {
+			world.setGameRule(rule, (T) value);
+		}
+	}
+
+	/**
+	 * Sets up server state manager with automatic Folia detection.
 	 *
 	 * @param plugin   your main plugin instance
 	 * @param commands the pre-gen command handler
 	 */
-	public ServerStateManager(JavaPlugin plugin,
-			PreGeneratorCommands commands) {
+	public ServerStateManager(JavaPlugin plugin, PreGeneratorCommands commands) {
 		this.plugin = plugin;
 		this.commands = commands;
-		this.foliaDetected = detectFolia();
+		this.scheduler = TaskScheduler.create(plugin);
 		this.optimizationDone = false;
 
 		Bukkit.getPluginManager().registerEvents(this, plugin);
 
-		// if server starts empty, run optimization immediately
 		if (noPlayersOnline()) {
-			scheduleDelayed(() -> optimizeServer(), 40L);
-		}
-	}
-
-	// check if we're on a Folia server (threaded regions)
-	private boolean detectFolia() {
-		try {
-			Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-			logColor(GREEN, "Folia detected, enabling support");
-			return true;
-		} catch (ClassNotFoundException e) {
-			logColor(YELLOW, "Folia not detected, running standard mode");
-			return false;
+			scheduler.scheduleDelayed(this::optimizeServer, 40L);
 		}
 	}
 
 	@EventHandler
 	public void onPlayerJoin(PlayerJoinEvent event) {
-	    scheduleImmediate(() -> {
-	        resetGameRules();
-	        // Silent auto-disable for all active pregen worlds
-	        for (String worldName : commands.getActivePreGenWorlds()) {
-	            World w = Bukkit.getWorld(worldName);
-	            if (w != null) {
-	                commands.getPreGenerator().disable(Bukkit.getConsoleSender(), w, false);
-	            }
-	        }
-	        commands.clearActivePreGenWorlds();
-	        optimizationDone = false;
-	    });
+		scheduler.scheduleImmediate(() -> {
+			applyGameRules(false); // Apply normal rules
+			stopAllPreGeneration();
+			optimizationDone = false;
+		});
 	}
 
 	@EventHandler
 	public void onPlayerQuit(PlayerQuitEvent event) {
-		// after a short delay, if server is empty, re-optimize
-		scheduleDelayed(() -> {
+		scheduler.scheduleDelayed(() -> {
 			if (noPlayersOnline() && !optimizationDone) {
 				optimizeServer();
 			}
 		}, 20L);
 	}
 
-	// core optimization steps when no players are online
 	private void optimizeServer() {
 		if (!PluginSettings.isInitialized()) {
 			logColor(YELLOW, "Settings not yet initialized, delaying optimization");
-			scheduleDelayed(() -> optimizeServer(), 20L);
+			scheduler.scheduleDelayed(this::optimizeServer, 20L);
 			return;
 		}
-		scheduleImmediate(() -> {
+
+		scheduler.scheduleImmediate(() -> {
 			logColor(WHITE, "No players online, optimizing server");
-			setPerformanceGameRules();
+			applyGameRules(true); // Apply optimized rules
 			unloadAllChunks();
 			commands.checkAndRunAutoPreGenerators(Bukkit.getConsoleSender());
 			optimizationDone = true;
 		});
 	}
 
-	// true when no one is connected
-	private boolean noPlayersOnline() {
-		return Bukkit.getOnlinePlayers().isEmpty();
-	}
-
-	// turn off random ticks, mob spawning, fire tick, spawn chunks
-	private void setPerformanceGameRules() {
-		for (World world : Bukkit.getWorlds()) {
-			setGameRule(world, GameRule.SPAWN_CHUNK_RADIUS, 0);
-			setGameRule(world, GameRule.RANDOM_TICK_SPEED, 0);
-			setGameRule(world, GameRule.DO_MOB_SPAWNING, false);
-			setGameRule(world, GameRule.DO_FIRE_TICK, false);
+	/**
+	 * Applies either optimized or normal game rule values to all worlds.
+	 *
+	 * @param useOptimized true for optimized values, false for normal values
+	 */
+	private void applyGameRules(boolean useOptimized) {
+		for (GameRuleMapping mapping : GameRuleMapping.values()) {
+			mapping.applyToAllWorlds(useOptimized);
 		}
 	}
 
-	// restore defaults for spawn chunks, ticks, mob spawning, fire tick
-	private void resetGameRules() {
-		for (World world : Bukkit.getWorlds()) {
-			setGameRule(world, GameRule.SPAWN_CHUNK_RADIUS, DEFAULT_SPAWN_CHUNK_RADIUS);
-			setGameRule(world, GameRule.RANDOM_TICK_SPEED, DEFAULT_RANDOM_TICK_SPEED);
-			setGameRule(world, GameRule.DO_MOB_SPAWNING, DEFAULT_MOB_SPAWNING);
-			setGameRule(world, GameRule.DO_FIRE_TICK, DEFAULT_FIRE_TICK);
+	private void stopAllPreGeneration() {
+		for (String worldName : commands.getActivePreGenWorlds()) {
+			World world = Bukkit.getWorld(worldName);
+			if (world != null) {
+				commands.getPreGenerator().disable(Bukkit.getConsoleSender(), world, false);
+			}
 		}
+		commands.clearActivePreGenWorlds();
 	}
 
-	// unload all currently loaded chunks in every world
 	private void unloadAllChunks() {
 		for (World world : Bukkit.getWorlds()) {
 			for (Chunk chunk : world.getLoadedChunks()) {
-				if (foliaDetected) {
+				if (scheduler instanceof FoliaScheduler) {
 					Bukkit.getRegionScheduler()
 					.execute(plugin, world, chunk.getX(), chunk.getZ(), () -> {
 						if (chunk.isLoaded()) {
@@ -146,37 +223,12 @@ public class ServerStateManager implements Listener {
 		}
 	}
 
-	/**
-	 * Schedule a task after a delay (in server ticks).
-	 *
-	 * @param task      what to run
-	 * @param delayTicks how many ticks to wait
-	 */
-	private void scheduleDelayed(Runnable task, long delayTicks) {
-		if (foliaDetected) {
-			plugin.getServer()
-			.getGlobalRegionScheduler()
-			.runDelayed(plugin, t -> task.run(), delayTicks);
-		} else {
-			Bukkit.getScheduler().runTaskLater(plugin, task, delayTicks);
-		}
+	private boolean noPlayersOnline() {
+		return Bukkit.getOnlinePlayers().isEmpty();
 	}
 
 	/**
-	 * Schedule a task to run right away on the main thread.
-	 *
-	 * @param task what to run
-	 */
-	private void scheduleImmediate(Runnable task) {
-		if (foliaDetected) {
-			plugin.getServer().getGlobalRegionScheduler().execute(plugin, task);
-		} else {
-			Bukkit.getScheduler().runTask(plugin, task);
-		}
-	}
-
-	/**
-	 * Set a GameRule value in a world.
+	 * Set a GameRule value in a world (kept for backward compatibility).
 	 *
 	 * @param world the target world
 	 * @param rule  the GameRule to change
