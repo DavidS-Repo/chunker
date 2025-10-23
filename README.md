@@ -3,11 +3,22 @@
 Join our **Discord Community** for help, support, issues, feedback, and discussions!
 Click here to join: **[Join Our Discord](https://discord.gg/FUx7fk4PsA)**
 
-#### Supported MC Versions:
+## Contributions
+
+**PRs welcome**
+
+This repository is public. Fork the repo, create a branch, and open a pull request. I will merge changes that work and do not introduce issues. If I need changes I will leave feedback.
+
+Quick checklist
+- Link the related issue if any
+- Add a short description and steps to test
+- Build must pass with `mvn clean package` (Java 21)
+
+## Supported MC Versions:
 - Minecraft 1.20.5+  
 - Requires Java 21 or higher
 
-#### Supported Servers:
+## Supported Servers:
 - Spigot, Bukkit, Paper, Pufferfish, Purpur, Leaf, and Folia
 
 <div style="display: flex; justify-content: space-between; width: 100% !important;">
@@ -180,13 +191,7 @@ world_the_end:
   radius: default
 ```
 
-## Summary of Changes from Older Versions
-- **No more Virtual Threads** – Uses standard `CompletableFuture` concurrency on Paper.
-- **Improved Schedulers** – Custom async scheduler using `ForkJoinPool.commonPool()`.
-- **Minimal State Tracking** – Uses small progress files per world (e.g., `world_pregenerator.txt`).
-
 ## Quick Tips
 1. Begin with `parallel_tasks_multiplier = 1`, then adjust.
 2. Async loading (Paper and Folia) = much better performance.
 3. Use `print_update_delay` of 10s+ to avoid excessive log output during long runs.
-
