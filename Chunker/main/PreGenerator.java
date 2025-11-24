@@ -19,8 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import static main.ConsoleColorUtils.*;
 
 /**
- * PreGenerator is responsible for pre-generating chunks asynchronously
- * to improve server performance.
+ * Handles async chunk pre-generation for one or more worlds.
  */
 public class PreGenerator implements Listener {
 
@@ -35,13 +34,17 @@ public class PreGenerator implements Listener {
 	private static final String DISABLED_WARNING_MESSAGE  = "pre-generator is already disabled.";
 	private static final String RADIUS_EXCEEDED_MESSAGE   = "radius reached. To process more chunks, please increase the radius.";
 
-	// Detect Paper and Folia at runtime
 	private static final boolean IS_PAPER = detectPaper();
 	private static final boolean IS_FOLIA = detectFolia();
 	private static final boolean REQUIRES_CHUNK_SAFETY = ServerVersion.getInstance().requiresChunkSafety();
 
 	private long task_queue_timer;
 
+	/**
+	 * Creates a new pre-generator instance and registers player listeners.
+	 *
+	 * @param plugin the owning plugin
+	 */
 	public PreGenerator(JavaPlugin plugin) {
 		this.plugin = plugin;
 		logPlain("Available Processors: " + PluginSettings.getAvailableProcessors());
@@ -56,7 +59,9 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Enables the pre-generator for a specific world.
+	 * Starts a pre-generation task for the given world.
+	 *
+	 * @return true if the task was created, false if it was already running
 	 */
 	public synchronized boolean enable(CommandSender sender,
 			int parallelTasksMultiplier,
@@ -83,6 +88,7 @@ public class PreGenerator implements Listener {
 		task.radius    = radius;
 		task.enabled   = true;
 		task.worldId   = worldId;
+		task.stopAfterCurrentRegion = false;
 
 		task_queue_timer = PluginSettings.getTaskQueueTimer(world.getName());
 
@@ -90,8 +96,30 @@ public class PreGenerator implements Listener {
 			tasks.put(worldId, task);
 		}
 
+		Location currentCenter = resolveCenterLocation(world);
+		int currentCenterBlockX = currentCenter.getBlockX();
+		int currentCenterBlockZ = currentCenter.getBlockZ();
+
 		task.timerStart = System.currentTimeMillis();
-		load.state(plugin, task);
+		boolean loaded = load.state(plugin, task);
+
+		if (!loaded || task.totalChunksProcessed.sum() == 0L) {
+			applyCenter(task, currentCenter);
+		} else {
+			if (task.stateHasCenter &&
+					(task.centerBlockX != currentCenterBlockX || task.centerBlockZ != currentCenterBlockZ)) {
+				ResetPreGenState.reset(plugin, world.getName());
+				task.chunkIterator.reset();
+				task.totalChunksProcessed.reset();
+				task.stopAfterCurrentRegion = false;
+				applyCenter(task, currentCenter);
+			} else if (!task.stateHasCenter) {
+				task.centerBlockX = currentCenterBlockX;
+				task.centerBlockZ = currentCenterBlockZ;
+				task.stateHasCenter = true;
+			}
+		}
+
 		initializeSchedulers(task);
 
 		task.cleanupScheduler = new AsyncDelayedScheduler();
@@ -101,8 +129,8 @@ public class PreGenerator implements Listener {
 						task.playerLoadedChunks.clear();
 					}
 				},
-				60_000,  // initial delay: 60s
-				60_000,  // period: 60s
+				60_000,
+				60_000,
 				TimeUnit.MILLISECONDS,
 				task.cleanupScheduler.isEnabledSupplier()
 				);
@@ -118,13 +146,75 @@ public class PreGenerator implements Listener {
 		return true;
 	}
 
+	/**
+	 * Finds the center point for generation for a world.
+	 * Uses settings center, world border center, or spawn as fallback.
+	 */
+	private Location resolveCenterLocation(World world) {
+		String worldName = world.getName();
+		PluginSettings.WorldSettings worldSettings = PluginSettings.getWorldSettings(worldName);
+		String centerSetting = worldSettings.center();
+		Location centerLocation;
+
+		if (centerSetting == null || centerSetting.trim().isEmpty() || centerSetting.equalsIgnoreCase("default")) {
+			centerLocation = world.getWorldBorder().getCenter();
+			if (centerLocation == null) {
+				centerLocation = world.getSpawnLocation();
+			}
+		} else {
+			String trimmed = centerSetting.trim();
+			if (trimmed.equals("~ ~")) {
+				centerLocation = world.getSpawnLocation();
+			} else {
+				String[] parts = trimmed.split("\\s+");
+				if (parts.length >= 2) {
+					try {
+						double x = Double.parseDouble(parts[0]);
+						double z = Double.parseDouble(parts[1]);
+						centerLocation = new Location(world, x, world.getSpawnLocation().getY(), z);
+					} catch (NumberFormatException e) {
+						centerLocation = world.getWorldBorder().getCenter();
+						if (centerLocation == null) {
+							centerLocation = world.getSpawnLocation();
+						}
+					}
+				} else {
+					centerLocation = world.getWorldBorder().getCenter();
+					if (centerLocation == null) {
+						centerLocation = world.getSpawnLocation();
+					}
+				}
+			}
+		}
+
+		return centerLocation;
+	}
+
+	/**
+	 * Applies the center position to the task and centers the iterator.
+	 */
+	private void applyCenter(PreGenerationTask task, Location centerLocation) {
+		task.centerBlockX = centerLocation.getBlockX();
+		task.centerBlockZ = centerLocation.getBlockZ();
+		task.stateHasCenter = true;
+
+		int centerChunkX = task.centerBlockX >> 4;
+		int centerChunkZ = task.centerBlockZ >> 4;
+		int centerRegionX = Math.floorDiv(centerChunkX, 32);
+		int centerRegionZ = Math.floorDiv(centerChunkZ, 32);
+		task.chunkIterator.setCenterRegion(centerRegionX, centerRegionZ);
+	}
+
+	/**
+	 * Creates scheduler instances for a task.
+	 */
 	private void initializeSchedulers(PreGenerationTask task) {
 		task.printScheduler      = new AsyncDelayedScheduler();
 		task.taskSubmitScheduler = new AsyncDelayedScheduler();
 	}
 
 	/**
-	 * Disables the pre-generator for a specific world.
+	 * Stops pre-generation for a world when called by a command.
 	 */
 	public synchronized void disable(CommandSender sender, World world, boolean showMessages) {
 		int worldId = WorldIdManager.getWorldId(world);
@@ -150,9 +240,12 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Terminates the pre-generation task, shutting down schedulers and saving state.
+	 * Shuts down a pre-generation task and prints final stats.
 	 */
 	private synchronized void terminate(PreGenerationTask task) {
+		if (!task.complete && task.totalChunksProcessed.sum() >= task.radius) {
+			task.complete = true;
+		}
 		task.timerEnd = System.currentTimeMillis();
 		try {
 			save.state(plugin, task);
@@ -170,8 +263,10 @@ public class PreGenerator implements Listener {
 		}
 	}
 
+	/**
+	 * Disables all schedulers for a task.
+	 */
 	private void shutdownSchedulers(PreGenerationTask task) {
-		if (!task.enabled) return;
 		if (task.printScheduler != null) {
 			task.printScheduler.setEnabled(false);
 		}
@@ -184,30 +279,33 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Starts the chunk generation process using your custom AsyncDelayedScheduler for Folia, or existing paths for Paper/Spigot.
+	 * Starts the main generation loop for a task.
+	 * Uses different paths for Folia, Paper, and Spigot.
 	 */
 	private void startGeneration(PreGenerationTask task) {
 		if (IS_FOLIA) {
-			// FOLIA PATH with custom scheduler
 			task.taskSubmitScheduler.scheduleAtFixedRate(
 					() -> {
 						if (!task.enabled) return;
 
 						for (int i = 0; i < task.parallelTasksMultiplier; i++) {
-							if (task.totalChunksProcessed.sum() >= task.radius) {
-								saveTaskState(task);
-								task.taskSubmitScheduler.setEnabled(false);
-								return;
-							}
 							RegionChunkIterator.NextChunkResult nextChunkResult =
 									task.chunkIterator.getNextChunkCoordinates();
 							if (nextChunkResult == null) {
 								saveTaskState(task);
 								task.taskSubmitScheduler.setEnabled(false);
+								task.complete = true;
+								terminate(task);
 								return;
 							}
 							if (nextChunkResult.regionCompleted) {
 								saveTaskState(task);
+								if (task.stopAfterCurrentRegion) {
+									task.taskSubmitScheduler.setEnabled(false);
+									task.complete = true;
+									terminate(task);
+									return;
+								}
 							}
 							ChunkPos nextChunkPos = nextChunkResult.chunkPos;
 							processChunkFolia(task, nextChunkPos);
@@ -219,23 +317,27 @@ public class PreGenerator implements Listener {
 					task.taskSubmitScheduler.isEnabledSupplier()
 					);
 		} else if (IS_PAPER) {
-			// PAPER PATH
 			task.taskSubmitScheduler.scheduleAtFixedRate(
 					() -> {
 						if (!task.enabled) return;
 						for (int i = 0; i < task.parallelTasksMultiplier; i++) {
-							if (task.totalChunksProcessed.sum() >= task.radius) {
-								saveTaskState(task);
-								return;
-							}
 							RegionChunkIterator.NextChunkResult nextChunkResult =
 									task.chunkIterator.getNextChunkCoordinates();
 							if (nextChunkResult == null) {
 								saveTaskState(task);
+								task.taskSubmitScheduler.setEnabled(false);
+								task.complete = true;
+								terminate(task);
 								return;
 							}
 							if (nextChunkResult.regionCompleted) {
 								saveTaskState(task);
+								if (task.stopAfterCurrentRegion) {
+									task.taskSubmitScheduler.setEnabled(false);
+									task.complete = true;
+									terminate(task);
+									return;
+								}
 							}
 							ChunkPos nextChunkPos = nextChunkResult.chunkPos;
 							CompletableFuture.runAsync(() -> {
@@ -258,7 +360,6 @@ public class PreGenerator implements Listener {
 					task.taskSubmitScheduler.isEnabledSupplier()
 					);
 		} else {
-			// SPIGOT / BUKKIT PATH (unchanged)
 			new org.bukkit.scheduler.BukkitRunnable() {
 				@Override
 				public void run() {
@@ -276,15 +377,21 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Folia chunk processing.
+	 * Loads and unloads a single chunk on Folia.
 	 */
 	private void processChunkFolia(PreGenerationTask task, ChunkPos chunkPos) {
 		if (!task.enabled) return;
 		Bukkit.getRegionScheduler().execute(plugin, task.world, chunkPos.getX(), chunkPos.getZ(), () -> {
 			if (!task.enabled) return;
 			task.world.getChunkAtAsync(chunkPos.getX(), chunkPos.getZ(), true).thenAccept(chunk -> {
+				if (!task.enabled) {
+					return;
+				}
 				if (chunk != null && chunk.isLoaded()) {
 					Bukkit.getRegionScheduler().execute(plugin, task.world, chunkPos.getX(), chunkPos.getZ(), () -> {
+						if (!task.enabled) {
+							return;
+						}
 						chunk.unload(true);
 						task.totalChunksProcessed.increment();
 						task.chunksThisCycle++;
@@ -305,7 +412,7 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Paper: async chunk load with conditional safety measures.
+	 * Loads a chunk on Paper and unloads it again.
 	 */
 	private void processChunkPaper(PreGenerationTask task, ChunkPos chunkPos) {
 		if (!task.enabled) return;
@@ -320,19 +427,25 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Spigot/Bukkit synchronous chunk processing.
+	 * Processes chunks on the main thread for Spigot or Bukkit.
 	 */
 	private void syncProcess(PreGenerationTask task) {
 		try {
 			if (!task.enabled) return;
-			if (task.totalChunksProcessed.sum() >= task.radius) return;
 			RegionChunkIterator.NextChunkResult nextChunkResult = task.chunkIterator.getNextChunkCoordinates();
 			if (nextChunkResult == null) {
 				saveTaskState(task);
+				task.complete = true;
+				terminate(task);
 				return;
 			}
 			if (nextChunkResult.regionCompleted) {
 				saveTaskState(task);
+				if (task.stopAfterCurrentRegion) {
+					task.complete = true;
+					terminate(task);
+					return;
+				}
 			}
 			ChunkPos chunkPos = nextChunkResult.chunkPos;
 			handleChunkBukkit(task, chunkPos);
@@ -343,6 +456,9 @@ public class PreGenerator implements Listener {
 		}
 	}
 
+	/**
+	 * Loads and unloads a chunk on the main thread.
+	 */
 	private void handleChunkBukkit(PreGenerationTask task, ChunkPos chunkPos) {
 		try {
 			if (!task.enabled) return;
@@ -361,7 +477,7 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Paper's getChunkAtAsync with safety measures for affected versions.
+	 * Loads a chunk on Paper using a dummy player for safe versions.
 	 */
 	public void getChunkAsyncWithSafety(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
 		if (!task.enabled) return;
@@ -378,7 +494,7 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Paper's getChunkAtAsync with immediate unload for unaffected versions.
+	 * Loads a chunk on Paper using the async API directly.
 	 */
 	private void getChunkAsync(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
 		if (!task.enabled) return;
@@ -395,23 +511,26 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Saves current progress to disk.
+	 * Writes current iterator and progress state to disk.
 	 */
 	private void saveTaskState(PreGenerationTask task) {
 		save.state(plugin, task);
 	}
 
 	/**
-	 * Checks if the radius limit is reached and terminates the task.
+	 * Marks that generation should stop after finishing the current region.
 	 */
 	private void completionCheck(PreGenerationTask task) {
 		if (!task.enabled) return;
-		if (task.totalChunksProcessed.sum() >= task.radius) {
-			task.complete = true;
-			terminate(task);
+		if (!task.stopAfterCurrentRegion && task.totalChunksProcessed.sum() >= task.radius) {
+			task.stopAfterCurrentRegion = true;
 		}
 	}
 
+	/**
+	 * Handles chunk load events while generation is active.
+	 * Used to avoid keeping old chunks loaded by players.
+	 */
 	@EventHandler(priority = EventPriority.HIGHEST)
 	private void onChunkLoad(ChunkLoadEvent event) {
 		try {
@@ -428,6 +547,9 @@ public class PreGenerator implements Listener {
 		}
 	}
 
+	/**
+	 * Unloads non-new chunks that load while pre-generation is running.
+	 */
 	private void handleChunkLoad(PreGenerationTask task, ChunkLoadEvent event) {
 		try {
 			if (!task.enabled) return;
@@ -449,7 +571,7 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Detect if running Paper.
+	 * Checks if the server is running on Paper.
 	 */
 	private static boolean detectPaper() {
 		try {
@@ -461,7 +583,7 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Detect if running Folia.
+	 * Checks if the server is running on Folia.
 	 */
 	private static boolean detectFolia() {
 		try {
