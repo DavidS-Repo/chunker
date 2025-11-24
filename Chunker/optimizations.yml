@@ -2,7 +2,6 @@
 # These settings control server behavior when no players are online (optimized) vs when players are online (normal)
 # Set 'manage_rule' to false to prevent chunker from modifying that specific game rule at all
 game_rules:
-  manage_spawn_chunk_radius: true # Set to false to prevent plugin from modifying spawn chunk radius
   manage_random_tick_speed: true # Set to false to prevent plugin from modifying random tick speed
   manage_do_mob_spawning: true # Set to false to prevent plugin from modifying mob spawning
   manage_do_fire_tick: true # Set to false to prevent plugin from modifying fire tick
@@ -17,7 +16,6 @@ game_rules:
   manage_do_entity_drops: true # Set to false to prevent plugin from modifying entity drops
   manage_do_tile_drops: true # Set to false to prevent plugin from modifying tile drops
   optimized:
-    spawn_chunk_radius: 0 # Chunks around spawn to keep loaded (0 = none)
     random_tick_speed: 0 # Random tick speed for crops/ice/etc (0 = disabled)
     do_mob_spawning: false # Whether mobs should spawn
     do_fire_tick: false # Whether fire should spread/extinguish
@@ -32,7 +30,6 @@ game_rules:
     do_entity_drops: false # Whether entities should drop items on death
     do_tile_drops: false # Whether blocks should drop when broken
   normal:
-    spawn_chunk_radius: 2 # Default spawn chunk radius when players are online
     random_tick_speed: 3 # Default random tick speed
     do_mob_spawning: true # Default mob spawning behavior
     do_fire_tick: true # Default fire behavior
