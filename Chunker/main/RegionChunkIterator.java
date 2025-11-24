@@ -2,15 +2,13 @@ package main;
 
 /**
  * Facilitates traversal of chunks within regions using a spiral pattern.
- * This mutable, synchronized implementation now preserves the original spiral behavior.
  */
 public final class RegionChunkIterator {
 	private static final int REGION_SIZE = 32;
 	private static final int DIRECTIONS_COUNT = 4;
-	private static final int[] DX = {1, 0, -1, 0}; // East, North, West, South
+	private static final int[] DX = {1, 0, -1, 0};
 	private static final int[] DZ = {0, 1, 0, -1};
 
-	// Mutable state variables
 	private int currentRegionX = 0;
 	private int currentRegionZ = 0;
 	private int directionIndex = 0;
@@ -21,15 +19,12 @@ public final class RegionChunkIterator {
 
 	/**
 	 * Retrieves the next chunk coordinates in the spiral order.
-	 * When a region’s chunks are fully iterated, it moves to the next region.
 	 *
-	 * @return the next chunk’s global coordinates along with a flag indicating a new region.
+	 * @return the next chunk’s global coordinates along with a flag indicating a new region, or null if traversal is complete
 	 */
 	public synchronized NextChunkResult getNextChunkCoordinates() {
-		// Check if the current region's chunks have been fully iterated.
 		if (isRegionComplete()) {
 			moveToNextRegion();
-			// Reset the chunk iteration for the new region.
 			chunkX = 0;
 			chunkZ = 0;
 			if (isTraversalComplete()) {
@@ -37,7 +32,6 @@ public final class RegionChunkIterator {
 			}
 			return new NextChunkResult(ChunkPos.get(globalX(), globalZ()), true);
 		}
-		// Return the current global chunk position, then advance the internal chunk iteration.
 		NextChunkResult result = new NextChunkResult(ChunkPos.get(globalX(), globalZ()), false);
 		advanceChunk();
 		return result;
@@ -45,10 +39,8 @@ public final class RegionChunkIterator {
 
 	/**
 	 * Determines if the current region's chunk iteration is complete.
-	 * In this implementation, we consider the region complete when both chunkX and chunkZ
-	 * have reached (or exceeded) REGION_SIZE.
 	 *
-	 * @return true if all chunks in the region have been iterated.
+	 * @return true if all chunks in the region have been iterated
 	 */
 	private boolean isRegionComplete() {
 		return chunkX >= REGION_SIZE && chunkZ >= REGION_SIZE;
@@ -56,8 +48,6 @@ public final class RegionChunkIterator {
 
 	/**
 	 * Advances the chunk coordinates within the current region.
-	 * When the end of a row is reached, resets chunkZ and increments chunkX.
-	 * When chunkX reaches REGION_SIZE, forces both coordinates to REGION_SIZE to signal completion.
 	 */
 	private void advanceChunk() {
 		chunkZ++;
@@ -66,7 +56,6 @@ public final class RegionChunkIterator {
 			chunkX++;
 		}
 		if (chunkX >= REGION_SIZE) {
-			// Force region complete state.
 			chunkX = REGION_SIZE;
 			chunkZ = REGION_SIZE;
 		}
@@ -74,7 +63,6 @@ public final class RegionChunkIterator {
 
 	/**
 	 * Advances the iterator to the next region using a spiral pattern.
-	 * This logic is equivalent to the original immutable state's prepareNextRegion() method.
 	 */
 	private void moveToNextRegion() {
 		if (stepsRemaining == 0) {
@@ -91,9 +79,8 @@ public final class RegionChunkIterator {
 
 	/**
 	 * Determines if the overall traversal is complete.
-	 * (You can define a termination condition here if needed.)
 	 *
-	 * @return false as a default.
+	 * @return false by default
 	 */
 	private boolean isTraversalComplete() {
 		return false;
@@ -114,11 +101,27 @@ public final class RegionChunkIterator {
 	}
 
 	/**
-	 * Resets the iterator to its initial state.
+	 * Resets the iterator to its initial state at region 0,0.
 	 */
 	public synchronized void reset() {
 		currentRegionX = 0;
 		currentRegionZ = 0;
+		directionIndex = 0;
+		stepsRemaining = 1;
+		stepsToChange = 1;
+		chunkX = 0;
+		chunkZ = 0;
+	}
+
+	/**
+	 * Sets the starting region for the spiral traversal.
+	 *
+	 * @param regionX starting region x coordinate
+	 * @param regionZ starting region z coordinate
+	 */
+	public synchronized void setCenterRegion(int regionX, int regionZ) {
+		currentRegionX = regionX;
+		currentRegionZ = regionZ;
 		directionIndex = 0;
 		stepsRemaining = 1;
 		stepsToChange = 1;
@@ -142,6 +145,16 @@ public final class RegionChunkIterator {
 		this.directionIndex = directionIndex;
 		this.stepsRemaining = stepsRemaining;
 		this.stepsToChange = stepsToChange;
+
+		if (chunkIndex < 0) {
+			chunkIndex = 0;
+		} else {
+			int maxIndex = (REGION_SIZE * REGION_SIZE) - 1; // 1023
+			if (chunkIndex > maxIndex) {
+				chunkIndex = maxIndex;
+			}
+		}
+
 		this.chunkX = chunkIndex >> 5;
 		this.chunkZ = chunkIndex & 31;
 	}
@@ -170,7 +183,16 @@ public final class RegionChunkIterator {
 	 * Returns the current chunk index within the region (encoded as (chunkX << 5) | chunkZ).
 	 */
 	public synchronized int getChunkIndex() {
-		return (chunkX << 5) | chunkZ;
+		int x = chunkX;
+		int z = chunkZ;
+
+		if (x < 0) x = 0;
+		if (z < 0) z = 0;
+
+		if (x >= REGION_SIZE) x = REGION_SIZE - 1;
+		if (z >= REGION_SIZE) z = REGION_SIZE - 1;
+
+		return (x << 5) | z;
 	}
 
 	/**
