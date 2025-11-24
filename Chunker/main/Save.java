@@ -30,14 +30,16 @@ public class Save {
 			return;
 		}
 		File dataFile = new File(dataFolder, task.world.getName() + "_pregenerator.txt");
-		String data = String.format("%d_%d_%d_%d_%d_%d_%d",
+		String data = String.format("%d_%d_%d_%d_%d_%d_%d_%d_%d",
 				task.chunkIterator.getCurrentRegionX(),
 				task.chunkIterator.getCurrentRegionZ(),
 				task.chunkIterator.getDirectionIndex(),
 				task.chunkIterator.getStepsRemaining(),
 				task.chunkIterator.getStepsToChange(),
 				task.chunkIterator.getChunkIndex(),
-				task.totalChunksProcessed.sum());
+				task.totalChunksProcessed.sum(),
+				task.centerBlockX,
+				task.centerBlockZ);
 		try {
 			Files.writeString(dataFile.toPath(), data, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 		} catch (IOException e) {
