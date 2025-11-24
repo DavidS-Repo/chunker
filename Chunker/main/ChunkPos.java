@@ -5,14 +5,12 @@ import com.google.common.cache.CacheBuilder;
 
 /**
  * Represents the (x, z) coordinates of a chunk along with its Morton code.
- * Uses caching to reduce frequent allocations.
  */
 public final class ChunkPos {
 	private final int x;
 	private final int z;
 	private final long mortonCode;
 
-	// Cache for frequently used ChunkPos instances; adjust maximumSize as needed.
 	private static final Cache<Long, ChunkPos> CACHE =
 			CacheBuilder.newBuilder()
 			.maximumSize(8192)
