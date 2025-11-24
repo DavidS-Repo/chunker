@@ -76,8 +76,6 @@ public class ServerStateManager implements Listener {
 	 * Maps plugin GameRule enums to Bukkit GameRule objects with their value getters.
 	 */
 	private enum GameRuleMapping {
-		SPAWN_CHUNK_RADIUS(PluginSettings.GameRule.SPAWN_CHUNK_RADIUS, 
-				() -> GameRule.SPAWN_CHUNK_RADIUS),
 		RANDOM_TICK_SPEED(PluginSettings.GameRule.RANDOM_TICK_SPEED, 
 				() -> GameRule.RANDOM_TICK_SPEED),
 		DO_MOB_SPAWNING(PluginSettings.GameRule.DO_MOB_SPAWNING, 
