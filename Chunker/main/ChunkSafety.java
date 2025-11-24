@@ -146,6 +146,7 @@ public class ChunkSafety {
 	 * @param location destination location
 	 * @return future that completes with true if teleport succeeded
 	 */
+	@SuppressWarnings("removal")
 	public static CompletableFuture<Boolean> teleportAsyncWithPassengers(Entity entity, Location location) {
 		return entity.teleportAsync(
 				location,
