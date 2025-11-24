@@ -33,5 +33,9 @@ public class PreGenerationTask {
 	public final ConcurrentHashMap<UUID, Set<ChunkPos>> playerChunkMap = new ConcurrentHashMap<>();
 	public AsyncDelayedScheduler printScheduler;
 	public AsyncDelayedScheduler taskSubmitScheduler;
-	public AsyncDelayedScheduler cleanupScheduler; // Scheduler for cleaning up playerLoadedChunks periodically
+	public AsyncDelayedScheduler cleanupScheduler;
+	public int centerBlockX;
+	public int centerBlockZ;
+	public boolean stateHasCenter;
+	public boolean stopAfterCurrentRegion;
 }
