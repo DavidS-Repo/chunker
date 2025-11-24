@@ -6,7 +6,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.*;
 
 /**
- * Manages settings.yml (world configurations) and optimizations.yml (game rules)
+ * Manages settings.yml (world configurations) and optimizations.yml (game rules).
  */
 public class PluginSettings {
 	private final JavaPlugin plugin;
@@ -20,7 +20,6 @@ public class PluginSettings {
 	 * Represents all configurable game rules with their default values.
 	 */
 	public enum GameRule {
-		SPAWN_CHUNK_RADIUS("spawn_chunk_radius", 0, 2, true),
 		RANDOM_TICK_SPEED("random_tick_speed", 0, 3, true),
 		DO_MOB_SPAWNING("do_mob_spawning", false, true, true),
 		DO_FIRE_TICK("do_fire_tick", false, true, true),
@@ -74,10 +73,11 @@ public class PluginSettings {
 			int taskQueueTimer,
 			String parallelTasksMultiplier,
 			String printUpdateDelay,
-			String radius
+			String radius,
+			String center
 			) {
 		public static WorldSettings getDefaults() {
-			return new WorldSettings(false, 60, "auto", "5s", "default");
+			return new WorldSettings(false, 60, "auto", "5s", "default", "default");
 		}
 
 		public static WorldSettings forWorld(String worldName) {
@@ -88,7 +88,8 @@ public class PluginSettings {
 					(int) settingsConfig.getLong(worldName + ".task_queue_timer", 60),
 					settingsConfig.getString(worldName + ".parallel_tasks_multiplier", "auto"),
 					settingsConfig.getString(worldName + ".print_update_delay", "5s"),
-					settingsConfig.getString(worldName + ".radius", "default")
+					settingsConfig.getString(worldName + ".radius", "default"),
+					settingsConfig.getString(worldName + ".center", "default")
 					);
 		}
 	}
@@ -176,8 +177,8 @@ public class PluginSettings {
 
 	private YamlConfiguration loadYamlConfig(CustomConfig loader) {
 		String raw = loader.loadConfig();
-		return (raw == null || raw.trim().isEmpty()) 
-				? new YamlConfiguration() 
+		return (raw == null || raw.trim().isEmpty())
+				? new YamlConfiguration()
 						: YamlConfiguration.loadConfiguration(new StringReader(raw));
 	}
 
@@ -206,6 +207,7 @@ public class PluginSettings {
 			settingsConfig.addDefault(name + ".parallel_tasks_multiplier", defaults.parallelTasksMultiplier());
 			settingsConfig.addDefault(name + ".print_update_delay", defaults.printUpdateDelay());
 			settingsConfig.addDefault(name + ".radius", defaults.radius());
+			settingsConfig.addDefault(name + ".center", defaults.center());
 		}
 	}
 
@@ -217,8 +219,6 @@ public class PluginSettings {
 			e.printStackTrace();
 		}
 	}
-
-	// Public API
 
 	/**
 	 * @return number of CPU cores available to the JVM
@@ -237,15 +237,13 @@ public class PluginSettings {
 		return WorldSettings.forWorld(worldName);
 	}
 
-	// Convenience methods for backward compatibility
 	public static boolean getAutoRun(String worldName) { return getWorldSettings(worldName).autoRun(); }
 	public static int getTaskQueueTimer(String worldName) { return getWorldSettings(worldName).taskQueueTimer(); }
 	public static String getParallelTasksMultiplier(String worldName) { return getWorldSettings(worldName).parallelTasksMultiplier(); }
 	public static String getPrintUpdateDelay(String worldName) { return getWorldSettings(worldName).printUpdateDelay(); }
 	public static String getRadius(String worldName) { return getWorldSettings(worldName).radius(); }
+	public static String getCenter(String worldName) { return getWorldSettings(worldName).center(); }
 
-	// Game rule convenience methods
-	public static boolean shouldManageSpawnChunkRadius() { return GameRule.SPAWN_CHUNK_RADIUS.isManaged(); }
 	public static boolean shouldManageRandomTickSpeed() { return GameRule.RANDOM_TICK_SPEED.isManaged(); }
 	public static boolean shouldManageDoMobSpawning() { return GameRule.DO_MOB_SPAWNING.isManaged(); }
 	public static boolean shouldManageDoFireTick() { return GameRule.DO_FIRE_TICK.isManaged(); }
@@ -260,7 +258,6 @@ public class PluginSettings {
 	public static boolean shouldManageDoEntityDrops() { return GameRule.DO_ENTITY_DROPS.isManaged(); }
 	public static boolean shouldManageDoTileDrops() { return GameRule.DO_TILE_DROPS.isManaged(); }
 
-	public static int getOptimizedSpawnChunkRadius() { return GameRule.SPAWN_CHUNK_RADIUS.getOptimizedValue(); }
 	public static int getOptimizedRandomTickSpeed() { return GameRule.RANDOM_TICK_SPEED.getOptimizedValue(); }
 	public static boolean getOptimizedDoMobSpawning() { return GameRule.DO_MOB_SPAWNING.getOptimizedValue(); }
 	public static boolean getOptimizedDoFireTick() { return GameRule.DO_FIRE_TICK.getOptimizedValue(); }
@@ -275,7 +272,6 @@ public class PluginSettings {
 	public static boolean getOptimizedDoEntityDrops() { return GameRule.DO_ENTITY_DROPS.getOptimizedValue(); }
 	public static boolean getOptimizedDoTileDrops() { return GameRule.DO_TILE_DROPS.getOptimizedValue(); }
 
-	public static int getNormalSpawnChunkRadius() { return GameRule.SPAWN_CHUNK_RADIUS.getNormalValue(); }
 	public static int getNormalRandomTickSpeed() { return GameRule.RANDOM_TICK_SPEED.getNormalValue(); }
 	public static boolean getNormalDoMobSpawning() { return GameRule.DO_MOB_SPAWNING.getNormalValue(); }
 	public static boolean getNormalDoFireTick() { return GameRule.DO_FIRE_TICK.getNormalValue(); }
