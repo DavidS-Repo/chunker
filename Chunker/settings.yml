@@ -20,6 +20,11 @@
 
 # radius: Defines how far the pre-generator should run (b-Blocks, c-Chunks, r-Regions) or 'default' to pre-generate until the world border.
 
+# center: Sets where the pregen spiral starts.
+# - 'default' uses the world border center, or the world spawn if no border center is set.
+# - '~ ~' always uses the current world spawn.
+# - 'x z' uses fixed block coordinates, for example: "0 0" or "1500 -500".
+
 # World Settings
 # exampleWorldName:
 #   auto_run: false # Acceptable values: true or false
@@ -27,3 +32,4 @@
 #   parallel_tasks_multiplier: auto # 'auto' or a positive integer value
 #   print_update_delay: 5s # Format: [value][s|m|h]. Example: 5s, 2h, 1d
 #   radius: default # Format: [value][b|c|r]. Example: 100b, 1c, 10r, or 'default'
+#   center: default # 'default', '~ ~', or 'x z' (block coords as two numbers, e.g. "0 0")
