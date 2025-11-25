@@ -169,26 +169,64 @@ The primary commands are:
 ## Configuration: settings.yml
 
 ```yaml
+# World Configuration for Chunker Plugin
+
+# auto_run: Set to true if you want pre-generation to start automatically when no players are on the server.
+# Acceptable values: true or false
+
+# task_queue_timer: Determines how fast chunks are queued up. A value between 50-70 is recommended for modern AMD 5000 series and Intel 13th Gen CPUs in the Overworld,
+# Adjust based on performance needs.
+
+# parallel_tasks_multiplier: Sets the number of async tasks running concurrently. 'auto' will distribute the tasks based on your thread count.
+# You can also set a specific integer value (e.g., 2, 4). It's recommended to stay below your total thread count.
+# Example with 'auto' and 12 threads:
+# world: 
+#   parallel_tasks_multiplier: 4
+# world_nether: 
+#   parallel_tasks_multiplier: 4
+# world_the_end: 
+#   parallel_tasks_multiplier: 4
+
+# print_update_delay: How often to print information (s-Seconds, m-Minutes, h-Hours). Default is 5s (5 seconds).
+
+# radius: Defines how far the pre-generator should run (b-Blocks, c-Chunks, r-Regions) or 'default' to pre-generate until the world border.
+
+# center: Sets where the pregen spiral starts.
+# - 'default' uses the world border center, or the world spawn if no border center is set.
+# - '~ ~' always uses the current world spawn.
+# - 'x z' uses fixed block coordinates, for example: "0 0" or "1500 -500".
+
+# World Settings
+# exampleWorldName:
+#   auto_run: false # Acceptable values: true or false
+#   task_queue_timer: 60 # Acceptable range: positive integer
+#   parallel_tasks_multiplier: auto # 'auto' or a positive integer value
+#   print_update_delay: 5s # Format: [value][s|m|h]. Example: 5s, 2h, 1d
+#   radius: default # Format: [value][b|c|r]. Example: 100b, 1c, 10r, or 'default'
+#   center: default # 'default', '~ ~', or 'x z' (block coords as two numbers, e.g. "0 0")
+
 world:
+  center: default
   auto_run: false
   task_queue_timer: 60
   parallel_tasks_multiplier: auto
   print_update_delay: 5s
   radius: default
-
 world_nether:
+  center: default
+  auto_run: false
+  task_queue_timer: 60
+  parallel_tasks_multiplier: auto
+  print_update_delay: 5s
+  radius: default
+world_the_end:
+  center: default
   auto_run: false
   task_queue_timer: 60
   parallel_tasks_multiplier: auto
   print_update_delay: 5s
   radius: default
 
-world_the_end:
-  auto_run: false
-  task_queue_timer: 60
-  parallel_tasks_multiplier: auto
-  print_update_delay: 5s
-  radius: default
 ```
 
 ## Quick Tips
