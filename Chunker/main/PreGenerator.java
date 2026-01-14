@@ -126,7 +126,12 @@ public class PreGenerator implements Listener {
 		task.cleanupScheduler.scheduleAtFixedRate(
 				() -> {
 					if (task.world.getPlayers().isEmpty()) {
-						task.playerLoadedChunks.clear();
+						synchronized (task.playerChunkLock) {
+							task.playerLoadedChunks.clear();
+							task.playerChunkMap.clear();
+							task.playerChunkRefCount.clear();
+							task.pinnedNewChunks.clear();
+						}
 					}
 				},
 				60_000,
@@ -256,7 +261,14 @@ public class PreGenerator implements Listener {
 		}
 		print.stop(task);
 		shutdownSchedulers(task);
-		task.playerLoadedChunks.clear();
+
+		synchronized (task.playerChunkLock) {
+			task.playerLoadedChunks.clear();
+			task.playerChunkMap.clear();
+			task.playerChunkRefCount.clear();
+			task.pinnedNewChunks.clear();
+		}
+
 		task.enabled = false;
 		synchronized (tasks) {
 			tasks.remove(task.worldId);
@@ -555,14 +567,19 @@ public class PreGenerator implements Listener {
 			if (!task.enabled) return;
 			Chunk chunk = event.getChunk();
 			if (chunk == null) return;
-			ChunkPos chunkPos = ChunkPos.get(chunk.getX(), chunk.getZ());
-			if (task.playerLoadedChunks.contains(chunkPos)) {
-				return;
-			}
-			if (!event.isNewChunk()) {
-				task.world.unloadChunk(chunk);
-			} else {
-				task.playerLoadedChunks.add(chunkPos);
+
+			long key = MortonCode.encode(chunk.getX(), chunk.getZ());
+
+			synchronized (task.playerChunkLock) {
+				if (task.playerLoadedChunks.contains(key) || task.pinnedNewChunks.contains(key)) {
+					return;
+				}
+
+				if (!event.isNewChunk()) {
+					task.world.unloadChunk(chunk);
+				} else {
+					task.pinnedNewChunks.add(key);
+				}
 			}
 		} catch (Exception e) {
 			exceptionMsg("Exception in handleChunkLoad: " + e.getMessage());
