@@ -1,10 +1,11 @@
 package main;
 
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.bukkit.World;
 
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -29,8 +30,11 @@ public class PreGenerationTask {
 	public long timerStart = 0;
 	public long timerEnd = 0;
 	public final RegionChunkIterator chunkIterator = new RegionChunkIterator();
-	public final Set<ChunkPos> playerLoadedChunks = ConcurrentHashMap.newKeySet();
-	public final ConcurrentHashMap<UUID, Set<ChunkPos>> playerChunkMap = new ConcurrentHashMap<>();
+	public final Object playerChunkLock = new Object();
+	public final Object2ObjectOpenHashMap<UUID, LongOpenHashSet> playerChunkMap = new Object2ObjectOpenHashMap<>();
+	public final Long2IntOpenHashMap playerChunkRefCount = new Long2IntOpenHashMap();
+	public final LongOpenHashSet playerLoadedChunks = new LongOpenHashSet();
+	public final LongOpenHashSet pinnedNewChunks = new LongOpenHashSet();
 	public AsyncDelayedScheduler printScheduler;
 	public AsyncDelayedScheduler taskSubmitScheduler;
 	public AsyncDelayedScheduler cleanupScheduler;
