@@ -1,5 +1,5 @@
 name: Chunker
-version: 1.21.10
+version: 1.21.11
 main: main.Chunker
 author: Go0fy_Go0ber
 description: Fast and Efficient Async Minecraft World Pre-generator
@@ -34,3 +34,4 @@ permissions:
       chunker.pregen: true
       chunker.pregenoff: true
       chunker.reset: true
+
