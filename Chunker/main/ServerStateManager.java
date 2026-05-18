@@ -1,8 +1,10 @@
 package main;
 
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.GameRule;
+import org.bukkit.GameRules;
 import org.bukkit.World;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -10,7 +12,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 import static main.ConsoleColorUtils.*;
 
@@ -51,12 +53,19 @@ public class ServerStateManager implements Listener {
 		public void scheduleDelayed(Runnable task, long delayTicks) {
 			plugin.getServer()
 			.getGlobalRegionScheduler()
-			.runDelayed(plugin, t -> task.run(), delayTicks);
+			.runDelayed(plugin, new ScheduledRunnable(task), delayTicks);
 		}
 
 		@Override
 		public void scheduleImmediate(Runnable task) {
 			plugin.getServer().getGlobalRegionScheduler().execute(plugin, task);
+		}
+	}
+
+	private record ScheduledRunnable(Runnable task) implements Consumer<ScheduledTask> {
+		@Override
+		public void accept(ScheduledTask scheduledTask) {
+			task.run();
 		}
 	}
 
@@ -76,39 +85,26 @@ public class ServerStateManager implements Listener {
 	 * Maps plugin GameRule enums to Bukkit GameRule objects with their value getters.
 	 */
 	private enum GameRuleMapping {
-		RANDOM_TICK_SPEED(PluginSettings.GameRule.RANDOM_TICK_SPEED, 
-				() -> GameRule.RANDOM_TICK_SPEED),
-		DO_MOB_SPAWNING(PluginSettings.GameRule.DO_MOB_SPAWNING, 
-				() -> GameRule.DO_MOB_SPAWNING),
-		DO_FIRE_TICK(PluginSettings.GameRule.DO_FIRE_TICK, 
-				() -> GameRule.DO_FIRE_TICK),
-		DO_PATROL_SPAWNING(PluginSettings.GameRule.DO_PATROL_SPAWNING, 
-				() -> GameRule.DO_PATROL_SPAWNING),
-		DO_WARDEN_SPAWNING(PluginSettings.GameRule.DO_WARDEN_SPAWNING, 
-				() -> GameRule.DO_WARDEN_SPAWNING),
-		DO_TRADER_SPAWNING(PluginSettings.GameRule.DO_TRADER_SPAWNING, 
-				() -> GameRule.DO_TRADER_SPAWNING),
-		MAX_ENTITY_CRAMMING(PluginSettings.GameRule.MAX_ENTITY_CRAMMING, 
-				() -> GameRule.MAX_ENTITY_CRAMMING),
-		MOB_GRIEFING(PluginSettings.GameRule.MOB_GRIEFING, 
-				() -> GameRule.MOB_GRIEFING),
-		DO_INSOMNIA(PluginSettings.GameRule.DO_INSOMNIA, 
-				() -> GameRule.DO_INSOMNIA),
-		DO_WEATHER_CYCLE(PluginSettings.GameRule.DO_WEATHER_CYCLE, 
-				() -> GameRule.DO_WEATHER_CYCLE),
-		DO_DAYLIGHT_CYCLE(PluginSettings.GameRule.DO_DAYLIGHT_CYCLE, 
-				() -> GameRule.DO_DAYLIGHT_CYCLE),
-		DO_ENTITY_DROPS(PluginSettings.GameRule.DO_ENTITY_DROPS, 
-				() -> GameRule.DO_ENTITY_DROPS),
-		DO_TILE_DROPS(PluginSettings.GameRule.DO_TILE_DROPS, 
-				() -> GameRule.DO_TILE_DROPS);
+		RANDOM_TICK_SPEED(PluginSettings.GameRule.RANDOM_TICK_SPEED, new IntRuleHandler(GameRules.RANDOM_TICK_SPEED)),
+		DO_MOB_SPAWNING(PluginSettings.GameRule.DO_MOB_SPAWNING, new BooleanRuleHandler(GameRules.SPAWN_MOBS)),
+		DO_FIRE_TICK(PluginSettings.GameRule.DO_FIRE_TICK, new FireTickRuleHandler(GameRules.FIRE_SPREAD_RADIUS_AROUND_PLAYER)),
+		DO_PATROL_SPAWNING(PluginSettings.GameRule.DO_PATROL_SPAWNING, new BooleanRuleHandler(GameRules.SPAWN_PATROLS)),
+		DO_WARDEN_SPAWNING(PluginSettings.GameRule.DO_WARDEN_SPAWNING, new BooleanRuleHandler(GameRules.SPAWN_WARDENS)),
+		DO_TRADER_SPAWNING(PluginSettings.GameRule.DO_TRADER_SPAWNING, new BooleanRuleHandler(GameRules.SPAWN_WANDERING_TRADERS)),
+		MAX_ENTITY_CRAMMING(PluginSettings.GameRule.MAX_ENTITY_CRAMMING, new IntRuleHandler(GameRules.MAX_ENTITY_CRAMMING)),
+		MOB_GRIEFING(PluginSettings.GameRule.MOB_GRIEFING, new BooleanRuleHandler(GameRules.MOB_GRIEFING)),
+		DO_INSOMNIA(PluginSettings.GameRule.DO_INSOMNIA, new BooleanRuleHandler(GameRules.SPAWN_PHANTOMS)),
+		DO_WEATHER_CYCLE(PluginSettings.GameRule.DO_WEATHER_CYCLE, new BooleanRuleHandler(GameRules.ADVANCE_WEATHER)),
+		DO_DAYLIGHT_CYCLE(PluginSettings.GameRule.DO_DAYLIGHT_CYCLE, new BooleanRuleHandler(GameRules.ADVANCE_TIME)),
+		DO_ENTITY_DROPS(PluginSettings.GameRule.DO_ENTITY_DROPS, new BooleanRuleHandler(GameRules.ENTITY_DROPS)),
+		DO_TILE_DROPS(PluginSettings.GameRule.DO_TILE_DROPS, new BooleanRuleHandler(GameRules.BLOCK_DROPS));
 
 		private final PluginSettings.GameRule configRule;
-		private final Supplier<GameRule<?>> bukkitRule;
+		private final RuleHandler handler;
 
-		GameRuleMapping(PluginSettings.GameRule configRule, Supplier<GameRule<?>> bukkitRule) {
+		GameRuleMapping(PluginSettings.GameRule configRule, RuleHandler handler) {
 			this.configRule = configRule;
-			this.bukkitRule = bukkitRule;
+			this.handler = handler;
 		}
 
 		/**
@@ -117,17 +113,107 @@ public class ServerStateManager implements Listener {
 		public void applyToAllWorlds(boolean useOptimized) {
 			if (!configRule.isManaged()) return;
 
-			Object value = useOptimized ? configRule.getOptimizedValue() : configRule.getNormalValue();
+			Object rawValue = useOptimized ? configRule.getOptimizedValue() : configRule.getNormalValue();
 
 			for (World world : Bukkit.getWorlds()) {
-				setGameRuleValue(world, bukkitRule.get(), value);
+				handler.apply(world, rawValue);
 			}
 		}
+	}
 
-		@SuppressWarnings("unchecked")
-		private static <T> void setGameRuleValue(World world, GameRule<T> rule, Object value) {
-			world.setGameRule(rule, (T) value);
+	private interface RuleHandler {
+		void apply(World world, Object rawValue);
+	}
+
+	private static final class BooleanRuleHandler implements RuleHandler {
+		private final GameRule<Boolean> rule;
+
+		private BooleanRuleHandler(GameRule<Boolean> rule) {
+			this.rule = rule;
 		}
+
+		@Override
+		public void apply(World world, Object rawValue) {
+			Boolean b = toBoolean(rawValue);
+			if (b == null) return;
+			world.setGameRule(rule, b);
+		}
+	}
+
+	private static class IntRuleHandler implements RuleHandler {
+		protected final GameRule<Integer> rule;
+
+		private IntRuleHandler(GameRule<Integer> rule) {
+			this.rule = rule;
+		}
+
+		@Override
+		public void apply(World world, Object rawValue) {
+			Integer i = toInteger(rawValue);
+			if (i == null) return;
+			world.setGameRule(rule, i);
+		}
+	}
+
+	private static final class FireTickRuleHandler extends IntRuleHandler {
+		private FireTickRuleHandler(GameRule<Integer> rule) {
+			super(rule);
+		}
+
+		@Override
+		public void apply(World world, Object rawValue) {
+			if (rawValue instanceof Boolean b) {
+				if (!b) {
+					world.setGameRule(rule, 0);
+					return;
+				}
+
+				Integer def = rule.getDefaultValue();
+				if (def != null) {
+					world.setGameRule(rule, def);
+					return;
+				}
+
+				Integer cur = world.getGameRuleValue(rule);
+				if (cur != null) {
+					world.setGameRule(rule, cur);
+					return;
+				}
+
+				world.setGameRule(rule, 0);
+				return;
+			}
+
+			super.apply(world, rawValue);
+		}
+	}
+
+	private static Boolean toBoolean(Object v) {
+		if (v instanceof Boolean b) return b;
+		if (v instanceof Number n) return n.intValue() != 0;
+
+		if (v instanceof String s) {
+			String t = s.trim();
+			if (t.equalsIgnoreCase("true")) return true;
+			if (t.equalsIgnoreCase("false")) return false;
+			if (t.equals("1")) return true;
+			if (t.equals("0")) return false;
+		}
+		return null;
+	}
+
+	private static Integer toInteger(Object v) {
+		if (v instanceof Integer i) return i;
+		if (v instanceof Number n) return n.intValue();
+
+		if (v instanceof String s) {
+			try {
+				return Integer.parseInt(s.trim());
+			} catch (NumberFormatException ignored) {
+				return null;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -196,7 +282,7 @@ public class ServerStateManager implements Listener {
 
 	private void stopAllPreGeneration() {
 		for (String worldName : commands.getActivePreGenWorlds()) {
-			World world = Bukkit.getWorld(worldName);
+			World world = WorldRegistry.resolveWorld(worldName, false);
 			if (world != null) {
 				commands.getPreGenerator().disable(Bukkit.getConsoleSender(), world, false);
 			}

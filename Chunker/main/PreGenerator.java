@@ -37,8 +37,7 @@ public class PreGenerator implements Listener {
 	private static final boolean IS_PAPER = detectPaper();
 	private static final boolean IS_FOLIA = detectFolia();
 	private static final boolean REQUIRES_CHUNK_SAFETY = ServerVersion.getInstance().requiresChunkSafety();
-
-	private long task_queue_timer;
+	private static final int SAFETY_IN_FLIGHT_WINDOW = 16;
 
 	/**
 	 * Creates a new pre-generator instance and registers player listeners.
@@ -69,15 +68,9 @@ public class PreGenerator implements Listener {
 			int timeValue,
 			int printTime,
 			World world,
-			long radius) {
+			long radius,
+			boolean forceChunkSafety) {
 		int worldId = WorldIdManager.getWorldId(world);
-
-		synchronized (tasks) {
-			if (tasks.containsKey(worldId)) {
-				colorMessage(sender, YELLOW, world.getName() + " " + ENABLED_WARNING_MESSAGE);
-				return false;
-			}
-		}
 
 		PreGenerationTask task = new PreGenerationTask();
 		task.parallelTasksMultiplier = parallelTasksMultiplier;
@@ -86,14 +79,15 @@ public class PreGenerator implements Listener {
 		task.printTime = printTime;
 		task.world     = world;
 		task.radius    = radius;
+		task.forceChunkSafety = forceChunkSafety;
 		task.enabled   = true;
 		task.worldId   = worldId;
 		task.stopAfterCurrentRegion = false;
+		task.taskQueueTimer = PluginSettings.getTaskQueueTimer(world);
 
-		task_queue_timer = PluginSettings.getTaskQueueTimer(world.getName());
-
-		synchronized (tasks) {
-			tasks.put(worldId, task);
+		if (tasks.putIfAbsent(worldId, task) != null) {
+			colorMessage(sender, YELLOW, WorldRegistry.id(world) + " " + ENABLED_WARNING_MESSAGE);
+			return false;
 		}
 
 		Location currentCenter = resolveCenterLocation(world);
@@ -108,9 +102,10 @@ public class PreGenerator implements Listener {
 		} else {
 			if (task.stateHasCenter &&
 					(task.centerBlockX != currentCenterBlockX || task.centerBlockZ != currentCenterBlockZ)) {
-				ResetPreGenState.reset(plugin, world.getName());
+				ResetPreGenState.reset(plugin, WorldRegistry.id(world));
 				task.chunkIterator.reset();
 				task.totalChunksProcessed.reset();
+				task.submittedChunks.set(0L);
 				task.stopAfterCurrentRegion = false;
 				applyCenter(task, currentCenter);
 			} else if (!task.stateHasCenter) {
@@ -141,9 +136,14 @@ public class PreGenerator implements Listener {
 				);
 
 		if (task.totalChunksProcessed.sum() >= radius) {
-			colorMessage(sender, YELLOW, world.getName() + " " + RADIUS_EXCEEDED_MESSAGE);
+			colorMessage(sender, YELLOW, WorldRegistry.id(world) + " " + RADIUS_EXCEEDED_MESSAGE);
 			terminate(task);
 			return false;
+		}
+		if (task.forceChunkSafety && IS_FOLIA) {
+			colorMessage(sender, YELLOW, "chunk safety flag is only used on Paper; Folia will use its region scheduler path for " + WorldRegistry.id(world) + ".");
+		} else if (task.forceChunkSafety && IS_PAPER && !REQUIRES_CHUNK_SAFETY) {
+			colorMessage(sender, GOLD, "chunk safety forced for " + WorldRegistry.id(world) + "; generation will be more thorough but slower.");
 		}
 
 		startGeneration(task);
@@ -156,8 +156,7 @@ public class PreGenerator implements Listener {
 	 * Uses settings center, world border center, or spawn as fallback.
 	 */
 	private Location resolveCenterLocation(World world) {
-		String worldName = world.getName();
-		PluginSettings.WorldSettings worldSettings = PluginSettings.getWorldSettings(worldName);
+		PluginSettings.WorldSettings worldSettings = PluginSettings.getWorldSettings(world);
 		String centerSetting = worldSettings.center();
 		Location centerLocation;
 
@@ -226,15 +225,13 @@ public class PreGenerator implements Listener {
 		PreGenerationTask task;
 
 		synchronized (tasks) {
-			task = tasks.get(worldId);
+			task = tasks.remove(worldId);
 			if (task == null || !task.enabled) {
 				if (showMessages) {
-					colorMessage(sender, YELLOW, world.getName() + " " + DISABLED_WARNING_MESSAGE);
+					colorMessage(sender, YELLOW, WorldRegistry.id(world) + " " + DISABLED_WARNING_MESSAGE);
 				}
-				tasks.remove(worldId);
 				return;
 			}
-			tasks.remove(worldId);
 		}
 
 		terminate(task);
@@ -248,8 +245,14 @@ public class PreGenerator implements Listener {
 	 * Shuts down a pre-generation task and prints final stats.
 	 */
 	private synchronized void terminate(PreGenerationTask task) {
+		if (!task.terminationStarted.compareAndSet(false, true)) {
+			return;
+		}
 		if (!task.complete && task.totalChunksProcessed.sum() >= task.radius) {
 			task.complete = true;
+		}
+		if (task.taskSubmitScheduler != null) {
+			task.taskSubmitScheduler.setEnabled(false);
 		}
 		task.timerEnd = System.currentTimeMillis();
 		try {
@@ -271,7 +274,7 @@ public class PreGenerator implements Listener {
 
 		task.enabled = false;
 		synchronized (tasks) {
-			tasks.remove(task.worldId);
+			tasks.remove(task.worldId, task);
 		}
 	}
 
@@ -324,7 +327,7 @@ public class PreGenerator implements Listener {
 						}
 					},
 					1,
-					task_queue_timer,
+					task.taskQueueTimer,
 					TimeUnit.MILLISECONDS,
 					task.taskSubmitScheduler.isEnabledSupplier()
 					);
@@ -332,6 +335,12 @@ public class PreGenerator implements Listener {
 			task.taskSubmitScheduler.scheduleAtFixedRate(
 					() -> {
 						if (!task.enabled) return;
+						boolean usesSafety = usesPaperChunkSafety(task);
+						if (usesSafety) {
+							processPaperSafetyBatch(task);
+							return;
+						}
+
 						for (int i = 0; i < task.parallelTasksMultiplier; i++) {
 							RegionChunkIterator.NextChunkResult nextChunkResult =
 									task.chunkIterator.getNextChunkCoordinates();
@@ -352,22 +361,11 @@ public class PreGenerator implements Listener {
 								}
 							}
 							ChunkPos nextChunkPos = nextChunkResult.chunkPos;
-							CompletableFuture.runAsync(() -> {
-								try {
-									processChunkPaper(task, nextChunkPos);
-								} catch (Exception e) {
-									exceptionMsg("Exception in processChunkPaper: " + e.getMessage());
-									e.printStackTrace();
-								}
-							}).exceptionally(ex -> {
-								exceptionMsg("Exception in CompletableFuture: " + ex.getMessage());
-								ex.printStackTrace();
-								return null;
-							});
+							processChunkPaper(task, nextChunkPos);
 						}
 					},
 					0,
-					task_queue_timer,
+					task.taskQueueTimer,
 					TimeUnit.MILLISECONDS,
 					task.taskSubmitScheduler.isEnabledSupplier()
 					);
@@ -389,6 +387,47 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
+	 * Submits safety-mode chunks without blocking the scheduler.
+	 */
+	private void processPaperSafetyBatch(PreGenerationTask task) {
+		if (!task.enabled) return;
+		if (task.submittedChunks.get() >= task.radius) {
+			completeSafetyTaskIfReady(task);
+			return;
+		}
+
+		int active = task.activeSafetyTasks.get();
+		int available = Math.max(0, maxSafetyInFlight(task) - active);
+		int batchSize = Math.min(task.parallelTasksMultiplier, available);
+		if (batchSize <= 0) {
+			return;
+		}
+
+		for (int i = 0; i < batchSize; i++) {
+			if (!task.enabled || task.submittedChunks.get() >= task.radius) {
+				break;
+			}
+			RegionChunkIterator.NextChunkResult nextChunkResult =
+					task.chunkIterator.getNextChunkCoordinates();
+			if (nextChunkResult == null) {
+				task.complete = true;
+				terminate(task);
+				return;
+			}
+
+			task.submittedChunks.incrementAndGet();
+			processChunkPaperWithSafety(task, nextChunkResult.chunkPos);
+		}
+
+		completeSafetyTaskIfReady(task);
+	}
+
+	private int maxSafetyInFlight(PreGenerationTask task) {
+		long limit = (long) task.parallelTasksMultiplier * SAFETY_IN_FLIGHT_WINDOW;
+		return (int) Math.min(Integer.MAX_VALUE, Math.max(task.parallelTasksMultiplier, limit));
+	}
+
+	/**
 	 * Loads and unloads a single chunk on Folia.
 	 */
 	private void processChunkFolia(PreGenerationTask task, ChunkPos chunkPos) {
@@ -406,17 +445,19 @@ public class PreGenerator implements Listener {
 						}
 						chunk.unload(true);
 						task.totalChunksProcessed.increment();
-						task.chunksThisCycle++;
+						task.chunksThisCycle.increment();
 						completionCheck(task);
 					});
 				} else {
 					task.totalChunksProcessed.increment();
+					task.chunksThisCycle.increment();
 					completionCheck(task);
 				}
 			}).exceptionally(ex -> {
 				exceptionMsg("Async chunk load exception in processChunkFolia: " + ex.getMessage());
 				ex.printStackTrace();
 				task.totalChunksProcessed.increment();
+				task.chunksThisCycle.increment();
 				completionCheck(task);
 				return null;
 			});
@@ -426,16 +467,49 @@ public class PreGenerator implements Listener {
 	/**
 	 * Loads a chunk on Paper and unloads it again.
 	 */
-	private void processChunkPaper(PreGenerationTask task, ChunkPos chunkPos) {
-		if (!task.enabled) return;
-		if (REQUIRES_CHUNK_SAFETY) {
-			getChunkAsyncWithSafety(task, chunkPos, true);
+	private CompletableFuture<Void> processChunkPaper(PreGenerationTask task, ChunkPos chunkPos) {
+		if (!task.enabled) return CompletableFuture.completedFuture(null);
+		if (usesPaperChunkSafety(task)) {
+			return processChunkPaperWithSafety(task, chunkPos);
 		} else {
 			getChunkAsync(task, chunkPos, true);
+			markChunkProcessed(task);
+			return CompletableFuture.completedFuture(null);
 		}
-		task.totalChunksProcessed.increment();
-		task.chunksThisCycle++;
-		completionCheck(task);
+	}
+
+	/**
+	 * Runs safety-mode chunk generation and counts progress only after the safety future completes.
+	 */
+	private CompletableFuture<Void> processChunkPaperWithSafety(PreGenerationTask task, ChunkPos chunkPos) {
+		task.activeSafetyTasks.incrementAndGet();
+		return getChunkAsyncWithSafety(task, chunkPos, true).exceptionally(ex -> {
+			Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+			exceptionMsg("Chunk safety generation failed for " + WorldRegistry.id(task.world) + " at "
+					+ chunkPos.getX() + "," + chunkPos.getZ() + ": " + cause.getMessage());
+			return null;
+		}).thenRun(() -> {
+			markChunkProcessed(task);
+		}).thenRun(() -> {
+			finishSafetyChunk(task);
+		});
+	}
+
+	private boolean usesPaperChunkSafety(PreGenerationTask task) {
+		return REQUIRES_CHUNK_SAFETY || task.forceChunkSafety;
+	}
+
+	private void finishSafetyChunk(PreGenerationTask task) {
+		task.activeSafetyTasks.decrementAndGet();
+		completeSafetyTaskIfReady(task);
+	}
+
+	private void completeSafetyTaskIfReady(PreGenerationTask task) {
+		if (!task.enabled || task.submittedChunks.get() < task.radius || task.activeSafetyTasks.get() > 0) {
+			return;
+		}
+		task.complete = true;
+		terminate(task);
 	}
 
 	/**
@@ -481,7 +555,7 @@ public class PreGenerator implements Listener {
 				if (!unloaded) break;
 			}
 			task.totalChunksProcessed.increment();
-			task.chunksThisCycle++;
+			task.chunksThisCycle.increment();
 		} catch (Exception e) {
 			exceptionMsg("Exception in handleChunkBukkit: " + e.getMessage());
 			e.printStackTrace();
@@ -489,20 +563,11 @@ public class PreGenerator implements Listener {
 	}
 
 	/**
-	 * Loads a chunk on Paper using a dummy player for safe versions.
+	 * Loads a chunk on Paper through the urgent async safety path.
 	 */
-	public void getChunkAsyncWithSafety(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
-		if (!task.enabled) return;
-		World world = task.world;
-		Location home = world.getSpawnLocation();
-		Bukkit.getScheduler().runTask(plugin, () -> {
-			ChunkSafety.spawnDummyAndProcess(
-					plugin,
-					world,
-					home,
-					chunkPos
-					);
-		});
+	private CompletableFuture<Void> getChunkAsyncWithSafety(PreGenerationTask task, ChunkPos chunkPos, boolean gen) {
+		if (!task.enabled) return CompletableFuture.completedFuture(null);
+		return ChunkSafety.generateAndUnload(task.world, chunkPos, gen);
 	}
 
 	/**
@@ -520,6 +585,13 @@ public class PreGenerator implements Listener {
 			ex.printStackTrace();
 			return null;
 		});
+	}
+
+	private void markChunkProcessed(PreGenerationTask task) {
+		if (!task.enabled) return;
+		task.totalChunksProcessed.increment();
+		task.chunksThisCycle.increment();
+		completionCheck(task);
 	}
 
 	/**
@@ -548,9 +620,7 @@ public class PreGenerator implements Listener {
 		try {
 			int worldId = WorldIdManager.getWorldId(event.getWorld());
 			PreGenerationTask task;
-			synchronized (tasks) {
-				task = tasks.get(worldId);
-			}
+			task = tasks.get(worldId);
 			if (task == null || !task.enabled) return;
 			handleChunkLoad(task, event);
 		} catch (Exception e) {

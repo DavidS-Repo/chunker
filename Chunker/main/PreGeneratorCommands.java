@@ -3,14 +3,12 @@ package main;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
-import org.bukkit.WorldCreator;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.File;
 import java.util.*;
 import static main.ConsoleColorUtils.*;
 
@@ -34,7 +32,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private final Set<String> activePreGenWorlds = new HashSet<>();
 
 	private static final String INVALID_INPUT = "Invalid numbers provided.";
-	private static final String COMMAND_USAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)>";
+	private static final String COMMAND_USAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)> [safety]";
 	private static final String ENABLED_WARNING = "pre-generator is already enabled.";
 	private static final String DISABLED_WARNING = "pre-generator is already disabled.";
 
@@ -62,7 +60,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				return true;
 			}
 			// ----- normal pregen -----
-			if (args.length == 4) {
+			if (args.length == 4 || args.length == 5) {
 				handleEnableCommand(sender, args);
 			} else {
 				colorMessage(sender, RED, COMMAND_USAGE + "\n/pregen reset <world>");
@@ -84,26 +82,24 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private void handleEnableCommand(CommandSender sender, String[] args) {
 		try {
 			int threadCount = Integer.parseInt(args[0]);
+			if (threadCount <= 0) {
+				colorMessage(sender, RED, INVALID_INPUT);
+				return;
+			}
 			int printTicks  = parseDelay(args[1]);
 			if (printTicks < 0) {
 				colorMessage(sender, RED, INVALID_INPUT);
 				return;
 			}
-			String worldName = args[2];
-			if (activePreGenWorlds.contains(worldName)) {
-				colorMessage(sender, YELLOW, worldName + " " + ENABLED_WARNING);
+			String requestedWorld = args[2];
+			World world = resolveWorld(sender, requestedWorld, true);
+			if (world == null) {
+				colorMessage(sender, RED, "World not found: " + requestedWorld);
 				return;
 			}
-			World world = Bukkit.getWorld(worldName);
-			if (world == null) {
-				colorMessage(sender, GOLD, "World '" + worldName + "' not loaded. Loading now...");
-				world = new WorldCreator(worldName).createWorld();
-				if (world != null) {
-					colorMessage(sender, GOLD, "World '" + worldName + "' loaded.");
-				}
-			}
-			if (world == null) {
-				colorMessage(sender, RED, "World not found: " + worldName);
+			String worldName = WorldRegistry.id(world);
+			if (activePreGenWorlds.contains(worldName)) {
+				colorMessage(sender, YELLOW, worldName + " " + ENABLED_WARNING);
 				return;
 			}
 			currentBorderChunks = calculateChunksInBorder(world);
@@ -113,6 +109,10 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				colorMessage(sender, RED, INVALID_INPUT);
 				return;
 			}
+			boolean forceChunkSafety = parseSafetyMode(sender, args);
+			if (args.length == 5 && !forceChunkSafety) {
+				return;
+			}
 
 			boolean started = preGenerator.enable(
 					sender,
@@ -120,7 +120,8 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					delayUnit, delayAmount,
 					printTicks,
 					world,
-					chunks
+					chunks,
+					forceChunkSafety
 					);
 			if (started) {
 				activePreGenWorlds.add(worldName);
@@ -144,7 +145,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				return;
 			}
 			for (String worldName : activePreGenWorlds) {
-				World w = Bukkit.getWorld(worldName);
+				World w = WorldRegistry.resolveWorld(worldName, false);
 				if (w != null) {
 					preGenerator.disable(sender, w, true);
 				}
@@ -152,14 +153,15 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			activePreGenWorlds.clear();
 			colorMessage(sender, RED, "pregeneration disabled for all worlds");
 		} else if (args.length == 1) {
-			String worldName = args[0];
+			String requestedWorld = args[0];
+			World world = WorldRegistry.resolveWorld(requestedWorld, false);
+			String worldName = world == null ? requestedWorld : WorldRegistry.id(world);
 			if (!activePreGenWorlds.contains(worldName)) {
 				colorMessage(sender, YELLOW, worldName + " " + DISABLED_WARNING);
 				return;
 			}
-			World world = Bukkit.getWorld(worldName);
 			if (world == null) {
-				colorMessage(sender, RED, "World not found: " + worldName);
+				colorMessage(sender, RED, "World not found: " + requestedWorld);
 				return;
 			}
 			preGenerator.disable(sender, world, true);
@@ -198,12 +200,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		try {
 			delayAmount = Integer.parseInt(input.substring(0, input.length() - 1));
 			delayUnit   = Character.toLowerCase(input.charAt(input.length() - 1));
-			switch (delayUnit) {
-			case 's': return delayAmount * TICKS_PER_SECOND;
-			case 'm': return delayAmount * TICKS_PER_MINUTE;
-			case 'h': return delayAmount * TICKS_PER_HOUR;
-			default:  return -1;
-			}
+			return switch (delayUnit) {
+			case 's' -> Math.multiplyExact(delayAmount, TICKS_PER_SECOND);
+			case 'm' -> Math.multiplyExact(delayAmount, TICKS_PER_MINUTE);
+			case 'h' -> Math.multiplyExact(delayAmount, TICKS_PER_HOUR);
+			default -> -1;
+			};
 		} catch (Exception e) {
 			return -1;
 		}
@@ -219,28 +221,20 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			}
 			radiusAmount = Long.parseLong(input.substring(0, input.length() - 1));
 			radiusUnit   = Character.toLowerCase(input.charAt(input.length() - 1));
-			switch (radiusUnit) {
-			case 'b': // blocks radius
-				// regions are 512 blocks, multiply by 2 for side length, round up to nearest region
-				long neededRegionsB = (long) Math.ceil((radiusAmount * 2) / 512.0);
-				long sideChunksB = neededRegionsB * 32; // 32 chunks per region
-				return sideChunksB * sideChunksB;
-			case 'c': // chunks radius
-				// regions are 32 chunks, multiply by 2 for side length, round up to nearest region
-				long neededRegionsC = (long) Math.ceil((radiusAmount * 2) / 32.0);
-				long sideChunksC = neededRegionsC * 32;
-				return sideChunksC * sideChunksC;
-			case 'r': // region radius
-				// regions radius, so just round up to nearest whole region on each side (if needed)
-				long sideRegions = (long) Math.ceil(radiusAmount * 2);
-				long sideChunksR = sideRegions * 32;
-				return sideChunksR * sideChunksR;
-			default:
-				return -1;
-			}
+			return switch (radiusUnit) {
+			case 'b' -> chunksForRegionSide(Math.ceilDiv(Math.multiplyExact(radiusAmount, 2L), 512L));
+			case 'c' -> chunksForRegionSide(Math.ceilDiv(Math.multiplyExact(radiusAmount, 2L), 32L));
+			case 'r' -> chunksForRegionSide(Math.multiplyExact(radiusAmount, 2L));
+			default -> -1;
+			};
 		} catch (Exception e) {
 			return -1;
 		}
+	}
+
+	private long chunksForRegionSide(long sideRegions) {
+		long sideChunks = Math.multiplyExact(sideRegions, 32L);
+		return Math.multiplyExact(sideChunks, sideChunks);
 	}
 
 	/**
@@ -252,11 +246,13 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			colorMessage(sender, YELLOW, "Settings not initialized, skipping auto-pregeneration");
 			return;
 		}
-		
-		for (String worldName : getAllWorldNames()) {
-			if (PluginSettings.getAutoRun(worldName) && Bukkit.getWorld(worldName) == null) {
+
+		List<String> allWorldNames = getAllWorldNames();
+
+		for (String worldName : allWorldNames) {
+			if (PluginSettings.getAutoRun(worldName) && WorldRegistry.resolveWorld(worldName, false) == null) {
 				colorMessage(sender, GREEN, "Loading world '" + worldName + "' for auto pregeneration...");
-				new WorldCreator(worldName).createWorld();
+				WorldRegistry.resolveWorld(worldName, true);
 			}
 		}
 		int totalCores = PluginSettings.getAvailableProcessors();
@@ -264,7 +260,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		Map<String, Integer> coresByWorld = new HashMap<>();
 
 		// collect fixed cores
-		for (String name : getAllWorldNames()) {
+		for (String name : allWorldNames) {
 			if (!PluginSettings.getAutoRun(name)) continue;
 			String mult = PluginSettings.getParallelTasksMultiplier(name);
 			if (!"auto".equalsIgnoreCase(mult)) {
@@ -282,7 +278,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 		// split remaining cores
 		int coresPerAuto = autoCount > 0 ? Math.max(1, totalCores / autoCount) : 0;
-		for (String name : getAllWorldNames()) {
+		for (String name : allWorldNames) {
 			if (PluginSettings.getAutoRun(name)
 					&& "auto".equalsIgnoreCase(PluginSettings.getParallelTasksMultiplier(name))) {
 				coresByWorld.put(name, coresPerAuto);
@@ -295,17 +291,17 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		for (Map.Entry<String, Integer> entry : coresByWorld.entrySet()) {
 			if (!noPlayers) break;
 			String worldName = entry.getKey();
-			World world = Bukkit.getWorld(worldName);
+			World world = WorldRegistry.resolveWorld(worldName, false);
 			if (world == null) continue;
 			currentBorderChunks = calculateChunksInBorder(world);
 			String radiusConfig = PluginSettings.getRadius(worldName);
 			long chunks = parseRadius(radiusConfig);
-			
+
 			if (chunks <= 0) {
 				colorMessage(sender, YELLOW, "Invalid radius for " + worldName + " (got " + chunks + " chunks), skipping");
 				continue;
 			}
-			
+
 			int printTicks = parseDelay(PluginSettings.getPrintUpdateDelay(worldName));
 			if (printTicks <= 0) {
 				colorMessage(sender, YELLOW, "Invalid print_update_delay for " + worldName + ", using 5s");
@@ -320,9 +316,10 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					delayUnit, delayAmount,
 					printTicks,
 					world,
-					chunks
+					chunks,
+					false
 					);
-			
+
 			if (started) {
 				activePreGenWorlds.add(worldName);
 				colorMessage(sender, GREEN, "pregeneration enabled for " + worldName + " with " + chunks + " chunks");
@@ -338,7 +335,8 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		double diameter   = border.getSize();
 		double halfBlocks = diameter / 2.0;
 		double halfChunks = Math.ceil(halfBlocks / 16.0);
-		return (long) Math.pow(halfChunks * 2 + 1, 2);
+		long sideChunks = (long) (halfChunks * 2 + 1);
+		return Math.multiplyExact(sideChunks, sideChunks);
 	}
 
 	@Override
@@ -353,53 +351,71 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				return Arrays.asList("<ParallelTasksMultiplier>", "reset");
 			}
 			if (args.length == 2 && args[0].equalsIgnoreCase("reset")) {
-				return getPregeneratorWorlds(plugin); // worlds with data file
+				return filterCompletions(getPregeneratorWorlds(plugin), args[1]); // dimensions with data files
 			}
 			if (args.length == 2) return Collections.singletonList("<PrintUpdateDelayin(Seconds/Minutes/Hours)>");
-			if (args.length == 3) return getAllWorldNames();
+			if (args.length == 3) return filterCompletions(getWorldSuggestions(), args[2]);
 			if (args.length == 4) return Arrays.asList("<Radius(Blocks/Chunks/Regions)>", "default");
+			if (args.length == 5) return filterCompletions(Collections.singletonList("safety"), args[4]);
 		}
 		if (command.getName().equalsIgnoreCase("pregenoff")) {
-			if (args.length == 1) return getAllWorldNames();
+			if (args.length == 1) return filterCompletions(getWorldSuggestions(), args[0]);
 		}
 		return Collections.emptyList();
 	}
 
 	/**
-	 * Scans the plugin folder for world folders (level.dat present).
+	 * Scans available 26.1+ dimensions.
 	 */
 	private List<String> getAllWorldNames() {
-		File container = Bukkit.getServer().getWorldContainer();
-		File[] files = container.listFiles();
-		if (files == null) return Collections.emptyList();
+		return WorldRegistry.discoverWorldIds(plugin);
+	}
 
-		List<String> names = new ArrayList<>();
-		for (File f : files) {
-			if (f.isDirectory() && new File(f, "level.dat").exists()) {
-				names.add(f.getName());
-			}
-		}
-		return names;
+	private List<String> getWorldSuggestions() {
+		return WorldRegistry.worldSuggestions(plugin);
 	}
 
 	/**
-	 * Scans the plugin's data folder for pregenerator data files and returns corresponding world names.
+	 * Scans the plugin's data folder for pregenerator data files and returns corresponding dimension keys.
 	 *
 	 * @param plugin the JavaPlugin instance
-	 * @return a list of world names that have pregenerator data
+	 * @return a list of dimension keys that have pregenerator data
 	 */
 	private List<String> getPregeneratorWorlds(JavaPlugin plugin) {
-		File dataFolder = plugin.getDataFolder();
-		File[] files = dataFolder.listFiles((dir, name) -> name.endsWith("_pregenerator.txt"));
-		if (files == null) return Collections.emptyList();
-		List<String> result = new ArrayList<>();
-		for (File f : files) {
-			String n = f.getName();
-			if (n.endsWith("_pregenerator.txt")) {
-				result.add(n.substring(0, n.length() - "_pregenerator.txt".length()));
+		return WorldRegistry.pregeneratorStateIds(plugin);
+	}
+
+	private World resolveWorld(CommandSender sender, String input, boolean loadIfMissing) {
+		World world = WorldRegistry.resolveWorld(input, false);
+		if (world != null || !loadIfMissing) return world;
+
+		colorMessage(sender, GOLD, "World '" + input + "' not loaded. Loading now...");
+		world = WorldRegistry.resolveWorld(input, true);
+		if (world != null) {
+			colorMessage(sender, GOLD, "World '" + WorldRegistry.id(world) + "' loaded.");
+		}
+		return world;
+	}
+
+	private List<String> filterCompletions(List<String> values, String input) {
+		if (input == null || input.isEmpty()) return values;
+
+		String prefix = input.toLowerCase(Locale.ROOT);
+		List<String> matches = new ArrayList<>();
+		for (String value : values) {
+			if (value.toLowerCase(Locale.ROOT).startsWith(prefix)) {
+				matches.add(value);
 			}
 		}
-		return result;
+		return matches;
+	}
+
+	private boolean parseSafetyMode(CommandSender sender, String[] args) {
+		if (args.length == 4) return false;
+		if (args[4].equalsIgnoreCase("safety")) return true;
+
+		colorMessage(sender, RED, "Unknown optional argument '" + args[4] + "'. Use 'safety' or omit it.");
+		return false;
 	}
 
 	/**

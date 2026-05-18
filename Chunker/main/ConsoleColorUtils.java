@@ -42,9 +42,9 @@ public class ConsoleColorUtils {
 
 	// known default worlds shortened
 	private static final Map<String, String> WORLD_SHORT_NAMES = Map.of(
-			"world",         "world",
-			"world_nether",  "nether",
-			"world_the_end", "end"
+			"minecraft:overworld", "world",
+			"minecraft:the_nether", "nether",
+			"minecraft:the_end", "end"
 			);
 
 	/**
@@ -156,7 +156,7 @@ public class ConsoleColorUtils {
 	 * Format a world name into a bracketed label.
 	 * Pads to match the longest short name.
 	 *
-	 * @param worldName folder name of the world
+	 * @param worldName canonical dimension key
 	 * @return bracketed, padded short name
 	 */
 	public static String formatWorldName(String worldName) {
@@ -174,7 +174,7 @@ public class ConsoleColorUtils {
 	private static int getMaxWorldNameLength() {
 		int max = 0;
 		for (World w : Bukkit.getWorlds()) {
-			String name = getWorldShortName(w.getName());
+			String name = getWorldShortName(WorldRegistry.id(w));
 			if (name.length() > max) {
 				max = name.length();
 			}
@@ -186,7 +186,7 @@ public class ConsoleColorUtils {
 	 * Map known world names to shorter labels.
 	 * Falls back to original name if unknown.
 	 *
-	 * @param worldName folder name
+	 * @param worldName canonical dimension key
 	 * @return short label
 	 */
 	public static String getWorldShortName(String worldName) {

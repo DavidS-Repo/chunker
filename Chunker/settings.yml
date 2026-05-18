@@ -9,16 +9,21 @@
 # parallel_tasks_multiplier: Sets the number of async tasks running concurrently. 'auto' will distribute the tasks based on your thread count.
 # You can also set a specific integer value (e.g., 2, 4). It's recommended to stay below your total thread count.
 # Example with 'auto' and 12 threads:
-# world: 
+# minecraft:overworld:
 #   parallel_tasks_multiplier: 4
-# world_nether: 
+# minecraft:the_nether:
 #   parallel_tasks_multiplier: 4
-# world_the_end: 
+# minecraft:the_end:
 #   parallel_tasks_multiplier: 4
 
 # print_update_delay: How often to print information (s-Seconds, m-Minutes, h-Hours). Default is 5s (5 seconds).
 
 # radius: Defines how far the pre-generator should run (b-Blocks, c-Chunks, r-Regions) or 'default' to pre-generate until the world border.
+
+# Optional command safety mode:
+# Add 'safety' after the radius to force Chunker's urgent async safety generation path.
+# Example: /pregen 4 5s minecraft:overworld 5r safety
+# This keeps progress tied to completed chunks while still queuing safety work in parallel.
 
 # center: Sets where the pregen spiral starts.
 # - 'default' uses the world border center, or the world spawn if no border center is set.
@@ -26,7 +31,6 @@
 # - 'x z' uses fixed block coordinates, for example: "0 0" or "1500 -500".
 
 # World Settings
-# exampleWorldName:
 #   auto_run: false # Acceptable values: true or false
 #   task_queue_timer: 60 # Acceptable range: positive integer
 #   parallel_tasks_multiplier: auto # 'auto' or a positive integer value

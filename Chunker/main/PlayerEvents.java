@@ -41,30 +41,12 @@ public class PlayerEvents implements Listener {
 
 			synchronized (tasks) {
 				for (PreGenerationTask task : tasks.values()) {
+					if (!task.enabled || !task.world.equals(player.getWorld())) continue;
+
 					synchronized (task.playerChunkLock) {
-						LongOpenHashSet set = task.playerChunkMap.get(playerId);
-						if (set == null) {
-							set = new LongOpenHashSet();
-							task.playerChunkMap.put(playerId, set);
-						}
-						if (set.remove(fromKey)) {
-							int c = task.playerChunkRefCount.get(fromKey) - 1;
-							if (c <= 0) {
-								task.playerChunkRefCount.remove(fromKey);
-								task.playerLoadedChunks.remove(fromKey);
-							} else {
-								task.playerChunkRefCount.put(fromKey, c);
-							}
-						}
-						if (set.add(toKey)) {
-							int c = task.playerChunkRefCount.get(toKey);
-							if (c == 0) {
-								task.playerLoadedChunks.add(toKey);
-								task.playerChunkRefCount.put(toKey, 1);
-							} else {
-								task.playerChunkRefCount.put(toKey, c + 1);
-							}
-						}
+						LongOpenHashSet set = getOrCreatePlayerChunks(task, playerId);
+						removeTrackedChunk(task, set, fromKey);
+						addTrackedChunk(task, set, toKey);
 					}
 				}
 			}
@@ -83,18 +65,7 @@ public class PlayerEvents implements Listener {
 			synchronized (tasks) {
 				for (PreGenerationTask task : tasks.values()) {
 					synchronized (task.playerChunkLock) {
-						LongOpenHashSet set = task.playerChunkMap.remove(playerId);
-						if (set == null) continue;
-
-						for (long key : set) {
-							int c = task.playerChunkRefCount.get(key) - 1;
-							if (c <= 0) {
-								task.playerChunkRefCount.remove(key);
-								task.playerLoadedChunks.remove(key);
-							} else {
-								task.playerChunkRefCount.put(key, c);
-							}
-						}
+						removePlayerFromTask(task, playerId);
 					}
 				}
 			}
@@ -116,33 +87,11 @@ public class PlayerEvents implements Listener {
 			synchronized (tasks) {
 				for (PreGenerationTask task : tasks.values()) {
 					synchronized (task.playerChunkLock) {
-						LongOpenHashSet oldSet = task.playerChunkMap.remove(playerId);
-						if (oldSet != null) {
-							for (long key : oldSet) {
-								int c = task.playerChunkRefCount.get(key) - 1;
-								if (c <= 0) {
-									task.playerChunkRefCount.remove(key);
-									task.playerLoadedChunks.remove(key);
-								} else {
-									task.playerChunkRefCount.put(key, c);
-								}
-							}
-						}
+						removePlayerFromTask(task, playerId);
+
 						if (task.world.equals(newWorld)) {
-							LongOpenHashSet set = task.playerChunkMap.get(playerId);
-							if (set == null) {
-								set = new LongOpenHashSet();
-								task.playerChunkMap.put(playerId, set);
-							}
-							if (set.add(toKey)) {
-								int c = task.playerChunkRefCount.get(toKey);
-								if (c == 0) {
-									task.playerLoadedChunks.add(toKey);
-									task.playerChunkRefCount.put(toKey, 1);
-								} else {
-									task.playerChunkRefCount.put(toKey, c + 1);
-								}
-							}
+							LongOpenHashSet set = getOrCreatePlayerChunks(task, playerId);
+							addTrackedChunk(task, set, toKey);
 						}
 					}
 				}
@@ -151,5 +100,51 @@ public class PlayerEvents implements Listener {
 			exceptionMsg("Exception in onPlayerChangedWorld: " + e.getMessage());
 			e.printStackTrace();
 		}
+	}
+
+	private static LongOpenHashSet getOrCreatePlayerChunks(PreGenerationTask task, UUID playerId) {
+		LongOpenHashSet set = task.playerChunkMap.get(playerId);
+		if (set == null) {
+			set = new LongOpenHashSet();
+			task.playerChunkMap.put(playerId, set);
+		}
+		return set;
+	}
+
+	private static void addTrackedChunk(PreGenerationTask task, LongOpenHashSet set, long key) {
+		if (!set.add(key)) return;
+
+		int count = task.playerChunkRefCount.get(key);
+		if (count == 0) {
+			task.playerLoadedChunks.add(key);
+			task.playerChunkRefCount.put(key, 1);
+			return;
+		}
+		task.playerChunkRefCount.put(key, count + 1);
+	}
+
+	private static void removeTrackedChunk(PreGenerationTask task, LongOpenHashSet set, long key) {
+		if (!set.remove(key)) return;
+
+		decrementTrackedChunk(task, key);
+	}
+
+	private static void removePlayerFromTask(PreGenerationTask task, UUID playerId) {
+		LongOpenHashSet set = task.playerChunkMap.remove(playerId);
+		if (set == null) return;
+
+		for (long key : set) {
+			decrementTrackedChunk(task, key);
+		}
+	}
+
+	private static void decrementTrackedChunk(PreGenerationTask task, long key) {
+		int count = task.playerChunkRefCount.get(key) - 1;
+		if (count <= 0) {
+			task.playerChunkRefCount.remove(key);
+			task.playerLoadedChunks.remove(key);
+			return;
+		}
+		task.playerChunkRefCount.put(key, count);
 	}
 }

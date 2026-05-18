@@ -6,6 +6,9 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.bukkit.World;
 
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -13,20 +16,25 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public class PreGenerationTask {
 
-	public boolean enabled = false;
-	public boolean complete = false;
+	public volatile boolean enabled = false;
+	public volatile boolean complete = false;
 	public int worldId;
 	public World world;
 	public int parallelTasksMultiplier;
 	public int timeValue;
 	public int printTime;
-	public int chunksPerSec;
+	public long chunksPerSec;
 	public int tasks;
 	public char timeUnit;
 	public long radius;
+	public boolean forceChunkSafety;
+	public final AtomicLong submittedChunks = new AtomicLong();
+	public final AtomicInteger activeSafetyTasks = new AtomicInteger();
+	public final AtomicBoolean terminationStarted = new AtomicBoolean();
 	public final LongAdder totalChunksProcessed = new LongAdder();
-	public int chunksThisCycle = 0;
-	public int localChunksThisCycle = 0;
+	public final LongAdder chunksThisCycle = new LongAdder();
+	public long localChunksThisCycle = 0;
+	public long taskQueueTimer;
 	public long timerStart = 0;
 	public long timerEnd = 0;
 	public final RegionChunkIterator chunkIterator = new RegionChunkIterator();
@@ -41,5 +49,5 @@ public class PreGenerationTask {
 	public int centerBlockX;
 	public int centerBlockZ;
 	public boolean stateHasCenter;
-	public boolean stopAfterCurrentRegion;
+	public volatile boolean stopAfterCurrentRegion;
 }

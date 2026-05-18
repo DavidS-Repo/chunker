@@ -75,10 +75,9 @@ public class Print {
 	 */
 	public void info(PreGenerationTask task) {
 		try {
-			task.localChunksThisCycle = task.chunksThisCycle;
+			task.localChunksThisCycle = task.chunksThisCycle.sumThenReset();
 			task.chunksPerSec = task.localChunksThisCycle / task.timeValue;
 			log(task);
-			reset(task);
 		} catch (Exception e) {
 			exceptionMsg("Exception in printInfo: " + e.getMessage());
 			e.printStackTrace();
@@ -92,7 +91,7 @@ public class Print {
 	 */
 	private void log(PreGenerationTask task) {
 		try {
-			String worldStr = formatColorObject(color, formatWorldName(task.world.getName()));
+			String worldStr = formatColorObject(color, formatWorldName(WorldRegistry.id(task.world)));
 			String processed = formatAligned(color, task.localChunksThisCycle, 5);
 			String perSecond = formatAligned(color, task.chunksPerSec, 5);
 			String radiusStr = formatAligned(color, task.radius, 14);
@@ -111,16 +110,5 @@ public class Print {
 			exceptionMsg("Exception in logProgress: " + e.getMessage());
 			e.printStackTrace();
 		}
-	}
-
-	/**
-	 * Resets cycle-specific counters after logging progress.
-	 *
-	 * @param task the PreGenerationTask whose progress is being tracked
-	 */
-	private void reset(PreGenerationTask task) {
-		task.chunksPerSec = 0;
-		task.localChunksThisCycle = 0;
-		task.chunksThisCycle = 0;
 	}
 }

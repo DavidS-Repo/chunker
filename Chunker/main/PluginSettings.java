@@ -1,6 +1,7 @@
 package main;
 
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.*;
@@ -83,6 +84,16 @@ public class PluginSettings {
 		public static WorldSettings forWorld(String worldName) {
 			if (!isInitialized()) return getDefaults();
 
+			return readWorldSettings(worldName);
+		}
+
+		public static WorldSettings forWorld(World world) {
+			if (!isInitialized()) return getDefaults();
+
+			return readWorldSettings(WorldRegistry.id(world));
+		}
+
+		private static WorldSettings readWorldSettings(String worldName) {
 			return new WorldSettings(
 					settingsConfig.getBoolean(worldName + ".auto_run", false),
 					(int) settingsConfig.getLong(worldName + ".task_queue_timer", 60),
@@ -92,6 +103,7 @@ public class PluginSettings {
 					settingsConfig.getString(worldName + ".center", "default")
 					);
 		}
+
 	}
 
 	/**
@@ -191,17 +203,9 @@ public class PluginSettings {
 	}
 
 	private void populateWorldDefaults() {
-		File worldContainer = plugin.getServer().getWorldContainer();
-		File[] worldFolders = worldContainer.listFiles();
-		if (worldFolders == null) return;
-
 		WorldSettings defaults = WorldSettings.getDefaults();
 
-		for (File worldFolder : worldFolders) {
-			if (!worldFolder.isDirectory()) continue;
-			if (!new File(worldFolder, "level.dat").exists()) continue;
-
-			String name = worldFolder.getName();
+		for (String name : WorldRegistry.discoverWorldIds(plugin)) {
 			settingsConfig.addDefault(name + ".auto_run", defaults.autoRun());
 			settingsConfig.addDefault(name + ".task_queue_timer", defaults.taskQueueTimer());
 			settingsConfig.addDefault(name + ".parallel_tasks_multiplier", defaults.parallelTasksMultiplier());
@@ -230,11 +234,15 @@ public class PluginSettings {
 	/**
 	 * Gets world settings for the specified world.
 	 *
-	 * @param worldName the name of the world folder
+	 * @param worldName canonical dimension key
 	 * @return world settings record with all configuration values
 	 */
 	public static WorldSettings getWorldSettings(String worldName) {
 		return WorldSettings.forWorld(worldName);
+	}
+
+	public static WorldSettings getWorldSettings(World world) {
+		return WorldSettings.forWorld(world);
 	}
 
 	public static boolean getAutoRun(String worldName) { return getWorldSettings(worldName).autoRun(); }
@@ -243,6 +251,7 @@ public class PluginSettings {
 	public static String getPrintUpdateDelay(String worldName) { return getWorldSettings(worldName).printUpdateDelay(); }
 	public static String getRadius(String worldName) { return getWorldSettings(worldName).radius(); }
 	public static String getCenter(String worldName) { return getWorldSettings(worldName).center(); }
+	public static int getTaskQueueTimer(World world) { return getWorldSettings(world).taskQueueTimer(); }
 
 	public static boolean shouldManageRandomTickSpeed() { return GameRule.RANDOM_TICK_SPEED.isManaged(); }
 	public static boolean shouldManageDoMobSpawning() { return GameRule.DO_MOB_SPAWNING.isManaged(); }

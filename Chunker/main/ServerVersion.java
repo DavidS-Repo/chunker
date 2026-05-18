@@ -9,7 +9,6 @@ import java.util.regex.Pattern;
  */
 public class ServerVersion {
 	private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
-	private static ServerVersion instance;
 	private final int major;
 	private final int minor;
 	private final int patch;
@@ -40,10 +39,11 @@ public class ServerVersion {
 	 * @return the ServerVersion instance
 	 */
 	public static ServerVersion getInstance() {
-		if (instance == null) {
-			instance = new ServerVersion();
-		}
-		return instance;
+		return Holder.INSTANCE;
+	}
+
+	private static final class Holder {
+		private static final ServerVersion INSTANCE = new ServerVersion();
 	}
 
 	/**
@@ -65,7 +65,7 @@ public class ServerVersion {
 		try {
 			version = Bukkit.getBukkitVersion();
 			if (version != null && version.contains("-")) {
-				return version.split("-")[0];
+				return version.substring(0, version.indexOf('-'));
 			}
 		} catch (Exception ignored) {}
 

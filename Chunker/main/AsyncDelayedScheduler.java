@@ -2,15 +2,22 @@ package main;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 public class AsyncDelayedScheduler {
 
 	private final AtomicBoolean isEnabled = new AtomicBoolean(true);
-	private static final int maxTasks = ForkJoinPool.commonPool().getParallelism();
-	private final Runnable[] taskBatch = new Runnable[maxTasks];
-	private int taskCount = 0;
-	private final Object lock = new Object();
+	private static final AtomicInteger SCHEDULER_IDS = new AtomicInteger();
+	private static final ThreadFactory VIRTUAL_THREAD_FACTORY = Thread.ofVirtual()
+			.name("Chunker-task-", 0)
+			.factory();
+
+	private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r ->
+	Thread.ofPlatform()
+	.daemon(true)
+	.name("Chunker-delay-scheduler-" + SCHEDULER_IDS.incrementAndGet())
+	.unstarted(r));
 
 	/**
 	 * Schedule a task with a delay.
@@ -21,27 +28,7 @@ public class AsyncDelayedScheduler {
 	 * @param unit  The time unit for the delay
 	 */
 	public void scheduleWithDelay(Runnable task, long delay, TimeUnit unit) {
-		synchronized (lock) {
-			if (taskCount == taskBatch.length) {
-				Runnable[] tasksToRun = new Runnable[taskCount];
-				System.arraycopy(taskBatch, 0, tasksToRun, 0, taskCount);
-				taskCount = 0;
-				scheduleBatchWithDelay(tasksToRun, tasksToRun.length, 0, unit);
-			}
-			taskBatch[taskCount++] = task;
-		}
-		CompletableFuture.delayedExecutor(delay, unit, ForkJoinPool.commonPool())
-		.execute(() -> {
-			Runnable[] tasksToRun;
-			int tasksToRunCount;
-			synchronized (lock) {
-				tasksToRun = new Runnable[taskCount];
-				System.arraycopy(taskBatch, 0, tasksToRun, 0, taskCount);
-				tasksToRunCount = taskCount;
-				taskCount = 0;
-			}
-			scheduleBatchWithDelay(tasksToRun, tasksToRunCount, 0, unit);
-		});
+		scheduleBatchWithDelay(new Runnable[] { task }, 1, delay, unit);
 	}
 
 	/**
@@ -53,18 +40,25 @@ public class AsyncDelayedScheduler {
 	 * @param unit    The time unit for the delay
 	 */
 	public void scheduleBatchWithDelay(Runnable[] tasks, int count, long delay, TimeUnit unit) {
-		CompletableFuture.delayedExecutor(delay, unit, ForkJoinPool.commonPool())
-		.execute(() -> {
-			if (isEnabled.get()) {
+		if (count <= 0) return;
+
+		Runnable[] tasksToRun = new Runnable[count];
+		System.arraycopy(tasks, 0, tasksToRun, 0, count);
+
+		try {
+			timer.schedule(() -> runAsync(() -> {
+				if (!isEnabled.get()) return;
+
 				for (int i = 0; i < count; i++) {
 					try {
-						tasks[i].run();
+						tasksToRun[i].run();
 					} catch (Exception e) {
 						e.printStackTrace();
 					}
 				}
-			}
-		});
+			}), delay, unit);
+		} catch (RejectedExecutionException ignored) {
+		}
 	}
 
 	/**
@@ -77,17 +71,7 @@ public class AsyncDelayedScheduler {
 	 * @param isEnabledSupplier Supplier to determine if the task should run
 	 */
 	public void scheduleAtFixedRate(Runnable task, long initialDelay, long period, TimeUnit unit, Supplier<Boolean> isEnabledSupplier) {
-		CompletableFuture.delayedExecutor(initialDelay, unit, ForkJoinPool.commonPool())
-		.execute(() -> {
-			if (isEnabledSupplier.get()) {
-				try {
-					task.run();
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-			scheduleAtFixedRate(task, period, period, unit, isEnabledSupplier);
-		});
+		scheduleNext(task, initialDelay, period, unit, isEnabledSupplier);
 	}
 
 	/**
@@ -108,7 +92,10 @@ public class AsyncDelayedScheduler {
 	 * @param enabled true to enable, false to disable
 	 */
 	public void setEnabled(boolean enabled) {
-		isEnabled.set(enabled);
+		boolean wasEnabled = isEnabled.getAndSet(enabled);
+		if (wasEnabled && !enabled) {
+			timer.shutdownNow();
+		}
 	}
 
 	/**
@@ -127,5 +114,28 @@ public class AsyncDelayedScheduler {
 	 */
 	public Supplier<Boolean> isEnabledSupplier() {
 		return isEnabled::get;
+	}
+
+	private void scheduleNext(Runnable task, long delay, long period, TimeUnit unit, Supplier<Boolean> isEnabledSupplier) {
+		if (!isEnabled.get() || !isEnabledSupplier.get()) return;
+
+		try {
+			timer.schedule(() -> runAsync(() -> {
+				try {
+					if (isEnabled.get() && isEnabledSupplier.get()) {
+						task.run();
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				} finally {
+					scheduleNext(task, period, period, unit, isEnabledSupplier);
+				}
+			}), delay, unit);
+		} catch (RejectedExecutionException ignored) {
+		}
+	}
+
+	private static void runAsync(Runnable task) {
+		VIRTUAL_THREAD_FACTORY.newThread(task).start();
 	}
 }

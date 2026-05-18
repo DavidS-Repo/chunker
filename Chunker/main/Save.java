@@ -26,10 +26,11 @@ public class Save {
 		}
 		File dataFolder = plugin.getDataFolder();
 		if (!dataFolder.exists() && !dataFolder.mkdirs()) {
-			logColor(RED, "Failed to create data folder for " + task.world.getName());
+			logColor(RED, "Failed to create data folder for " + WorldRegistry.id(task.world));
 			return;
 		}
-		File dataFile = new File(dataFolder, task.world.getName() + "_pregenerator.txt");
+		File dataFile = WorldRegistry.stateFile(plugin, task.world);
+		long processedChunks = Math.max(task.totalChunksProcessed.sum(), task.submittedChunks.get());
 		String data = String.format("%d_%d_%d_%d_%d_%d_%d_%d_%d",
 				task.chunkIterator.getCurrentRegionX(),
 				task.chunkIterator.getCurrentRegionZ(),
@@ -37,14 +38,14 @@ public class Save {
 				task.chunkIterator.getStepsRemaining(),
 				task.chunkIterator.getStepsToChange(),
 				task.chunkIterator.getChunkIndex(),
-				task.totalChunksProcessed.sum(),
+				processedChunks,
 				task.centerBlockX,
 				task.centerBlockZ);
 		try {
 			Files.writeString(dataFile.toPath(), data, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 		} catch (IOException e) {
 			e.printStackTrace();
-			exceptionMsg("Failed to save processed chunks for " + task.world.getName() + ": " + e.getMessage());
+			exceptionMsg("Failed to save processed chunks for " + WorldRegistry.id(task.world) + ": " + e.getMessage());
 		}
 	}
 }

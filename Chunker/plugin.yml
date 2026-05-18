@@ -1,17 +1,17 @@
 name: Chunker
-version: 1.21.11
+version: 26.1.2
 main: main.Chunker
 author: Go0fy_Go0ber
 description: Fast and Efficient Async Minecraft World Pre-generator
-api-version: 1.21
+api-version: '26.1.2'
 folia-supported: true
 paperweight-mappings-namespace: mojang
 commands:
   pregen:
-    description: "Enable chunk pre-generation, or reset pregen state. Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelay> <world> <RadiusInBlocks/Chunks/Regions> OR /pregen reset <world>"
+    description: "Enable chunk pre-generation, or reset pregen state. Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelay> <world> <RadiusInBlocks/Chunks/Regions> [safety] OR /pregen reset <world>"
     permission: chunker.pregen
     usage: |
-      /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radiusin(Blocks/Chunks/Regions) or default>
+      /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radiusin(Blocks/Chunks/Regions) or default> [safety]
       /pregen reset <world>
   pregenoff:
     description: Disable pre-generation
@@ -34,4 +34,3 @@ permissions:
       chunker.pregen: true
       chunker.pregenoff: true
       chunker.reset: true
-

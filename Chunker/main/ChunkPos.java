@@ -64,8 +64,7 @@ public final class ChunkPos {
 	@Override
 	public boolean equals(Object obj) {
 		if (this == obj) return true;
-		if (!(obj instanceof ChunkPos)) return false;
-		ChunkPos other = (ChunkPos) obj;
+		if (!(obj instanceof ChunkPos other)) return false;
 		return this.mortonCode == other.mortonCode;
 	}
 
@@ -147,9 +146,8 @@ public final class ChunkPos {
 		}
 
 		private static int ceilPow2(int x) {
-			int n = 1;
-			while (n < x) n <<= 1;
-			return n;
+			if (x <= 1) return 1;
+			return Integer.highestOneBit(x - 1) << 1;
 		}
 
 		private static int hash(long k) {

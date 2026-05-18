@@ -4,7 +4,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
-import java.util.List;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -23,12 +22,19 @@ public class Load {
 	 * @return true if a saved state was loaded, false if starting fresh
 	 */
 	public boolean state(JavaPlugin plugin, PreGenerationTask task) {
-		File dataFile = new File(plugin.getDataFolder(), task.world.getName() + "_pregenerator.txt");
-		if (dataFile.exists()) {
+		File dataFile = null;
+		for (File candidate : WorldRegistry.stateFiles(plugin, task.world)) {
+			if (candidate.isFile()) {
+				dataFile = candidate;
+				break;
+			}
+		}
+
+		if (dataFile != null) {
 			try {
-				List<String> lines = Files.readAllLines(dataFile.toPath());
-				if (!lines.isEmpty()) {
-					String[] parts = lines.get(0).split("_");
+				String state = Files.readString(dataFile.toPath()).strip();
+				if (!state.isEmpty()) {
+					String[] parts = state.split("_", -1);
 					if (parts.length == 7 || parts.length == 9) {
 						int x = Integer.parseInt(parts[0]);
 						int z = Integer.parseInt(parts[1]);
@@ -47,6 +53,7 @@ public class Load {
 
 						task.chunkIterator.setState(x, z, directionIndex, stepsRemaining, stepsToChange, chunkIndex);
 						task.totalChunksProcessed.add(processedChunks);
+						task.submittedChunks.set(processedChunks);
 
 						if (parts.length == 9) {
 							task.centerBlockX = Integer.parseInt(parts[7]);
@@ -75,10 +82,10 @@ public class Load {
 									StandardOpenOption.CREATE,
 									StandardOpenOption.TRUNCATE_EXISTING
 									);
-							logPlain("Upgraded pregenerator state file for " + task.world.getName() + " to include center 0,0");
+							logPlain("Upgraded pregenerator state file for " + WorldRegistry.id(task.world) + " to include center 0,0");
 						}
 
-						logPlain("Successfully loaded " + processedChunks + " processed chunks for " + task.world.getName());
+						logPlain("Successfully loaded " + processedChunks + " processed chunks for " + WorldRegistry.id(task.world));
 						return true;
 					} else {
 						throw new IOException("Invalid task state format. Expected 7 or 9 parts but found " + parts.length);
@@ -88,17 +95,19 @@ public class Load {
 				}
 			} catch (IOException | NumberFormatException e) {
 				e.printStackTrace();
-				exceptionMsg("Failed to load processed chunks for " + task.world.getName() + ": " + e.getMessage());
+				exceptionMsg("Failed to load processed chunks for " + WorldRegistry.id(task.world) + ": " + e.getMessage());
 				task.chunkIterator.reset();
 				task.totalChunksProcessed.reset();
+				task.submittedChunks.set(0L);
 				task.stateHasCenter = false;
 				return false;
 			}
 		} else {
 			task.chunkIterator.reset();
 			task.totalChunksProcessed.reset();
+			task.submittedChunks.set(0L);
 			task.stateHasCenter = false;
-			logPlain("No pre-generator data found for " + task.world.getName() + ". Starting fresh.");
+			logPlain("No pre-generator data found for " + WorldRegistry.id(task.world) + ". Starting fresh.");
 			return false;
 		}
 	}

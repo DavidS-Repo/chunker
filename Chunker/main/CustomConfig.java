@@ -4,6 +4,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.*;
 import java.nio.file.*;
+import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
 
 /**
@@ -30,8 +31,8 @@ public class CustomConfig {
 	 * @param content the content to save
 	 */
 	public void saveConfig(String content) {
-		try (BufferedWriter writer = Files.newBufferedWriter(configFilePath)) {
-			writer.write(content);
+		try {
+			Files.writeString(configFilePath, content, StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			plugin.getLogger().log(Level.SEVERE, "Could not save config", e);
 		}
@@ -43,15 +44,11 @@ public class CustomConfig {
 	 * @return the content of the config file as a String
 	 */
 	public String loadConfig() {
-		StringBuilder content = new StringBuilder();
-		try (BufferedReader reader = Files.newBufferedReader(configFilePath)) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				content.append(line).append("\n");
-			}
+		try {
+			return Files.readString(configFilePath, StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			plugin.getLogger().log(Level.SEVERE, "Could not load config", e);
 		}
-		return content.toString();
+		return "";
 	}
 }

@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>Chunker</groupId>
     <artifactId>Chunker</artifactId>
-    <version>1.21.11</version>
+    <version>26.1.2</version>
     <name>Chunker</name>
     <description>Fast and Efficient Async Minecraft World Pre-generator</description>
     <repositories>
@@ -22,13 +22,13 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>1.21.11-R0.1-SNAPSHOT</version>
+            <version>[26.1.2.build,)</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>dev.folia</groupId>
             <artifactId>folia-api</artifactId>
-            <version>1.21.11-R0.1-SNAPSHOT</version>
+            <version>[26.1.2.build,)</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -50,8 +50,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.14.1</version>
                 <configuration>
-                    <source>21</source>
-                    <target>21</target>
+                    <release>25</release>
                     <encoding>UTF-8</encoding>
                     <proc>none</proc>
                 </configuration>
@@ -89,4 +88,3 @@
         </plugins>
     </build>
 </project>
-
