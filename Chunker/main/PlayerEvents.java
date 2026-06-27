@@ -1,18 +1,18 @@
 package main;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
-import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerMoveEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static main.ConsoleColorUtils.*;
 
@@ -21,34 +21,39 @@ import static main.ConsoleColorUtils.*;
  */
 public class PlayerEvents implements Listener {
 
-	private final ConcurrentHashMap<Integer, PreGenerationTask> tasks;
+	private final Int2ObjectOpenHashMap<PreGenerationTask> tasks;
+	private final Object tasksLock;
 
-	public PlayerEvents(ConcurrentHashMap<Integer, PreGenerationTask> tasks) {
+	public PlayerEvents(Int2ObjectOpenHashMap<PreGenerationTask> tasks, Object tasksLock) {
 		this.tasks = tasks;
+		this.tasksLock = tasksLock;
 	}
 
-	@EventHandler(priority = EventPriority.MONITOR)
+	@EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
 	private void onPlayerMove(PlayerMoveEvent event) {
 		try {
-			Player player = event.getPlayer();
-			Chunk fromChunk = event.getFrom().getChunk();
-			Chunk toChunk = event.getTo().getChunk();
-			if (fromChunk.equals(toChunk)) return;
+			Location from = event.getFrom();
+			Location to = event.getTo();
+			if (to == null || from.getWorld() != to.getWorld()) return;
 
-			long fromKey = MortonCode.encode(fromChunk.getX(), fromChunk.getZ());
-			long toKey = MortonCode.encode(toChunk.getX(), toChunk.getZ());
+			int fromChunkX = from.getBlockX() >> 4;
+			int fromChunkZ = from.getBlockZ() >> 4;
+			int toChunkX = to.getBlockX() >> 4;
+			int toChunkZ = to.getBlockZ() >> 4;
+			if (fromChunkX == toChunkX && fromChunkZ == toChunkZ) return;
+
+			Player player = event.getPlayer();
+			PreGenerationTask task = taskForWorld(player.getWorld());
+			if (task == null || !task.enabled) return;
+
+			long fromKey = MortonCode.encode(fromChunkX, fromChunkZ);
+			long toKey = MortonCode.encode(toChunkX, toChunkZ);
 			UUID playerId = player.getUniqueId();
 
-			synchronized (tasks) {
-				for (PreGenerationTask task : tasks.values()) {
-					if (!task.enabled || !task.world.equals(player.getWorld())) continue;
-
-					synchronized (task.playerChunkLock) {
-						LongOpenHashSet set = getOrCreatePlayerChunks(task, playerId);
-						removeTrackedChunk(task, set, fromKey);
-						addTrackedChunk(task, set, toKey);
-					}
-				}
+			synchronized (task.playerChunkLock) {
+				LongOpenHashSet set = getOrCreatePlayerChunks(task, playerId);
+				removeTrackedChunk(task, set, fromKey);
+				addTrackedChunk(task, set, toKey);
 			}
 		} catch (Exception e) {
 			exceptionMsg("Exception in onPlayerMove: " + e.getMessage());
@@ -59,14 +64,11 @@ public class PlayerEvents implements Listener {
 	@EventHandler(priority = EventPriority.MONITOR)
 	private void onPlayerQuit(PlayerQuitEvent event) {
 		try {
-			Player player = event.getPlayer();
-			UUID playerId = player.getUniqueId();
-
-			synchronized (tasks) {
-				for (PreGenerationTask task : tasks.values()) {
-					synchronized (task.playerChunkLock) {
-						removePlayerFromTask(task, playerId);
-					}
+			UUID playerId = event.getPlayer().getUniqueId();
+			PreGenerationTask[] snapshot = taskSnapshot();
+			for (PreGenerationTask task : snapshot) {
+				synchronized (task.playerChunkLock) {
+					removePlayerFromTask(task, playerId);
 				}
 			}
 		} catch (Exception e) {
@@ -80,19 +82,18 @@ public class PlayerEvents implements Listener {
 		try {
 			Player player = event.getPlayer();
 			World newWorld = player.getWorld();
-			Chunk toChunk = player.getLocation().getChunk();
+			Location location = player.getLocation();
 			UUID playerId = player.getUniqueId();
-			long toKey = MortonCode.encode(toChunk.getX(), toChunk.getZ());
+			long toKey = MortonCode.encode(location.getBlockX() >> 4, location.getBlockZ() >> 4);
 
-			synchronized (tasks) {
-				for (PreGenerationTask task : tasks.values()) {
-					synchronized (task.playerChunkLock) {
-						removePlayerFromTask(task, playerId);
+			PreGenerationTask[] snapshot = taskSnapshot();
+			for (PreGenerationTask task : snapshot) {
+				synchronized (task.playerChunkLock) {
+					removePlayerFromTask(task, playerId);
 
-						if (task.world.equals(newWorld)) {
-							LongOpenHashSet set = getOrCreatePlayerChunks(task, playerId);
-							addTrackedChunk(task, set, toKey);
-						}
+					if (task.enabled && task.world.equals(newWorld)) {
+						LongOpenHashSet set = getOrCreatePlayerChunks(task, playerId);
+						addTrackedChunk(task, set, toKey);
 					}
 				}
 			}
@@ -102,10 +103,23 @@ public class PlayerEvents implements Listener {
 		}
 	}
 
+	private PreGenerationTask taskForWorld(World world) {
+		int worldId = WorldIdManager.getWorldId(world);
+		synchronized (tasksLock) {
+			return tasks.get(worldId);
+		}
+	}
+
+	private PreGenerationTask[] taskSnapshot() {
+		synchronized (tasksLock) {
+			return tasks.values().toArray(new PreGenerationTask[0]);
+		}
+	}
+
 	private static LongOpenHashSet getOrCreatePlayerChunks(PreGenerationTask task, UUID playerId) {
 		LongOpenHashSet set = task.playerChunkMap.get(playerId);
 		if (set == null) {
-			set = new LongOpenHashSet();
+			set = new LongOpenHashSet(4);
 			task.playerChunkMap.put(playerId, set);
 		}
 		return set;

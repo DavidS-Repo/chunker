@@ -5,9 +5,14 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>Chunker</groupId>
     <artifactId>Chunker</artifactId>
-    <version>26.1.2</version>
+    <version>26.2</version>
     <name>Chunker</name>
     <description>Fast and Efficient Async Minecraft World Pre-generator</description>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <fastutil.version>8.5.18</fastutil.version>
+    </properties>
     <repositories>
         <repository>
             <id>papermc-repo</id>
@@ -22,13 +27,19 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>[26.1.2.build,)</version>
+            <version>[26.1.build,)</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>dev.folia</groupId>
             <artifactId>folia-api</artifactId>
-            <version>[26.1.2.build,)</version>
+            <version>[26.1.build,)</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>it.unimi.dsi</groupId>
+            <artifactId>fastutil</artifactId>
+            <version>${fastutil.version}</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -55,36 +66,7 @@
                     <proc>none</proc>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.6.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/**</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <manifestEntries>
-                                        <paperweight-mappings-namespace>mojang</paperweight-mappings-namespace>
-                                    </manifestEntries>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
+
         </plugins>
     </build>
 </project>

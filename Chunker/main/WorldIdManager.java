@@ -1,6 +1,8 @@
 package main;
 
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -8,8 +10,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Manages unique task IDs for dimensions based on their canonical world keys.
  */
 public class WorldIdManager {
-	private static final AtomicInteger idCounter = new AtomicInteger(0);
-	private static final ConcurrentHashMap<String, Integer> worldIdMap = new ConcurrentHashMap<>();
+	private static final AtomicInteger idCounter = new AtomicInteger();
+	private static final ConcurrentHashMap<NamespacedKey, Integer> worldIdMap = new ConcurrentHashMap<>();
 
 	/**
 	 * Retrieves a unique integer ID for the given world.
@@ -18,7 +20,7 @@ public class WorldIdManager {
 	 * @return the unique integer ID for the world
 	 */
 	public static int getWorldId(World world) {
-		String worldKey = WorldRegistry.id(world);
+		NamespacedKey worldKey = world.getKey();
 		Integer existingId = worldIdMap.get(worldKey);
 		if (existingId != null) {
 			return existingId;

@@ -55,15 +55,15 @@ public class Print {
 		long hours = seconds / 3600;
 		long minutes = (seconds % 3600) / 60;
 		long remainingSeconds = seconds % 60;
-		StringBuilder formattedTime = new StringBuilder();
+		StringBuilder formattedTime = new StringBuilder(48);
 		if (hours > 0) {
-			formattedTime.append(hours).append(" Hour").append(hours > 1 ? "s" : "").append(" ");
+			formattedTime.append(hours).append(" Hour").append(hours > 1 ? "s" : "").append(' ');
 		}
 		if (minutes > 0) {
-			formattedTime.append(minutes).append(" Minute").append(minutes > 1 ? "s" : "").append(" ");
+			formattedTime.append(minutes).append(" Minute").append(minutes > 1 ? "s" : "").append(' ');
 		}
-		if (remainingSeconds > 0 || formattedTime.length() == 0) {
-			formattedTime.append(remainingSeconds).append(" Second").append(remainingSeconds != 1 ? "s" : "").append(" ");
+		if (remainingSeconds > 0 || formattedTime.isEmpty()) {
+			formattedTime.append(remainingSeconds).append(" Second").append(remainingSeconds != 1 ? "s" : "").append(' ');
 		}
 		return formattedTime.toString().trim();
 	}
@@ -91,11 +91,12 @@ public class Print {
 	 */
 	private void log(PreGenerationTask task) {
 		try {
-			String worldStr = formatColorObject(color, formatWorldName(WorldRegistry.id(task.world)));
+			String worldName = task.worldName != null ? task.worldName : WorldRegistry.id(task.world);
+			String worldStr = formatColorObject(color, formatWorldName(worldName));
 			String processed = formatAligned(color, task.localChunksThisCycle, 5);
 			String perSecond = formatAligned(color, task.chunksPerSec, 5);
 			String radiusStr = formatAligned(color, task.radius, 14);
-			StringBuilder sb = new StringBuilder();
+			StringBuilder sb = new StringBuilder(160);
 			sb.append(worldStr)
 			.append(" Processed: ").append(processed).append(" Chunks/").append(task.timeUnit).append(": ").append(perSecond).append(" Completed: ");
 			if (task.enabled && !task.complete) {

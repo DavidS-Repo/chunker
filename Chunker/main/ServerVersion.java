@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
  */
 public class ServerVersion {
 	private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
+	private static final Pattern MC_VERSION_PATTERN = Pattern.compile("MC:\\s*(\\d+\\.\\d+(?:\\.\\d+)?)");
+	private static final Pattern LEGACY_PACKAGE_PATTERN = Pattern.compile("v(\\d+)_(\\d+)_R\\d+");
 	private final int major;
 	private final int minor;
 	private final int patch;
@@ -52,34 +54,33 @@ public class ServerVersion {
 	 * @return the detected version string
 	 */
 	private String detectVersion() {
-		String version = null;
+		try {
+			String minecraftVersion = Bukkit.getMinecraftVersion();
+			if (minecraftVersion != null && !minecraftVersion.isBlank()) {
+				return minecraftVersion;
+			}
+		} catch (Exception | NoSuchMethodError ignored) {}
 
 		try {
-			version = Bukkit.getVersion();
-			Matcher matcher = Pattern.compile("MC:\\s*(\\d+\\.\\d+(?:\\.\\d+)?)").matcher(version);
+			String version = Bukkit.getVersion();
+			Matcher matcher = MC_VERSION_PATTERN.matcher(version);
 			if (matcher.find()) {
 				return matcher.group(1);
 			}
 		} catch (Exception ignored) {}
 
 		try {
-			version = Bukkit.getBukkitVersion();
-			if (version != null && version.contains("-")) {
-				return version.substring(0, version.indexOf('-'));
+			String version = Bukkit.getBukkitVersion();
+			if (version != null && !version.isBlank()) {
+				int dash = version.indexOf('-');
+				return dash >= 0 ? version.substring(0, dash) : version;
 			}
 		} catch (Exception ignored) {}
 
 		try {
-			String minecraftVersion = Bukkit.getMinecraftVersion();
-			if (minecraftVersion != null) {
-				return minecraftVersion;
-			}
-		} catch (Exception | NoSuchMethodError ignored) {}
-
-		try {
 			Package serverPackage = Bukkit.getServer().getClass().getPackage();
 			String packageName = serverPackage.getName();
-			Matcher matcher = Pattern.compile("v(\\d+)_(\\d+)_R\\d+").matcher(packageName);
+			Matcher matcher = LEGACY_PACKAGE_PATTERN.matcher(packageName);
 			if (matcher.find()) {
 				return "1." + matcher.group(2);
 			}
@@ -94,10 +95,7 @@ public class ServerVersion {
 	 * @return true if version is 1.21, 1.21.1, or 1.21.2
 	 */
 	private boolean checkIfAffected() {
-		if (major != 1 || minor != 21) {
-			return false;
-		}
-		return patch >= 0 && patch <= 2;
+		return major == 1 && minor == 21 && patch >= 0 && patch <= 2;
 	}
 
 	/**

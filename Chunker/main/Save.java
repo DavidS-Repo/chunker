@@ -24,28 +24,30 @@ public class Save {
 		if (!task.enabled) {
 			return;
 		}
+		String worldName = task.worldName != null ? task.worldName : WorldRegistry.id(task.world);
 		File dataFolder = plugin.getDataFolder();
 		if (!dataFolder.exists() && !dataFolder.mkdirs()) {
-			logColor(RED, "Failed to create data folder for " + WorldRegistry.id(task.world));
+			logColor(RED, "Failed to create data folder for " + worldName);
 			return;
 		}
-		File dataFile = WorldRegistry.stateFile(plugin, task.world);
+		File dataFile = WorldRegistry.stateFile(plugin, worldName);
 		long processedChunks = Math.max(task.totalChunksProcessed.sum(), task.submittedChunks.get());
-		String data = String.format("%d_%d_%d_%d_%d_%d_%d_%d_%d",
-				task.chunkIterator.getCurrentRegionX(),
-				task.chunkIterator.getCurrentRegionZ(),
-				task.chunkIterator.getDirectionIndex(),
-				task.chunkIterator.getStepsRemaining(),
-				task.chunkIterator.getStepsToChange(),
-				task.chunkIterator.getChunkIndex(),
-				processedChunks,
-				task.centerBlockX,
-				task.centerBlockZ);
+		String data = new StringBuilder(96)
+				.append(task.chunkIterator.getCurrentRegionX()).append('_')
+				.append(task.chunkIterator.getCurrentRegionZ()).append('_')
+				.append(task.chunkIterator.getDirectionIndex()).append('_')
+				.append(task.chunkIterator.getStepsRemaining()).append('_')
+				.append(task.chunkIterator.getStepsToChange()).append('_')
+				.append(task.chunkIterator.getChunkIndex()).append('_')
+				.append(processedChunks).append('_')
+				.append(task.centerBlockX).append('_')
+				.append(task.centerBlockZ)
+				.toString();
 		try {
 			Files.writeString(dataFile.toPath(), data, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 		} catch (IOException e) {
 			e.printStackTrace();
-			exceptionMsg("Failed to save processed chunks for " + WorldRegistry.id(task.world) + ": " + e.getMessage());
+			exceptionMsg("Failed to save processed chunks for " + worldName + ": " + e.getMessage());
 		}
 	}
 }

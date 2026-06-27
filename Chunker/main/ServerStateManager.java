@@ -23,7 +23,7 @@ public class ServerStateManager implements Listener {
 	private final JavaPlugin plugin;
 	private final PreGeneratorCommands commands;
 	private final TaskScheduler scheduler;
-	private boolean optimizationDone;
+	private volatile boolean optimizationDone;
 
 	/**
 	 * Abstraction for task scheduling that handles both Folia and standard Bukkit.
@@ -110,13 +110,15 @@ public class ServerStateManager implements Listener {
 		/**
 		 * Applies optimized or normal values to all worlds based on rule configuration.
 		 */
-		public void applyToAllWorlds(boolean useOptimized) {
-			if (!configRule.isManaged()) return;
+		private static final GameRuleMapping[] CACHED_VALUES = values();
 
-			Object rawValue = useOptimized ? configRule.getOptimizedValue() : configRule.getNormalValue();
-
-			for (World world : Bukkit.getWorlds()) {
-				handler.apply(world, rawValue);
+		private static void applyAll(boolean useOptimized) {
+			for (GameRuleMapping mapping : CACHED_VALUES) {
+				if (!mapping.configRule.isManaged()) continue;
+				Object rawValue = useOptimized ? mapping.configRule.getOptimizedValue() : mapping.configRule.getNormalValue();
+				for (World world : Bukkit.getWorlds()) {
+					mapping.handler.apply(world, rawValue);
+				}
 			}
 		}
 	}
@@ -136,7 +138,10 @@ public class ServerStateManager implements Listener {
 		public void apply(World world, Object rawValue) {
 			Boolean b = toBoolean(rawValue);
 			if (b == null) return;
-			world.setGameRule(rule, b);
+			Boolean current = world.getGameRuleValue(rule);
+			if (!b.equals(current)) {
+				world.setGameRule(rule, b);
+			}
 		}
 	}
 
@@ -151,7 +156,10 @@ public class ServerStateManager implements Listener {
 		public void apply(World world, Object rawValue) {
 			Integer i = toInteger(rawValue);
 			if (i == null) return;
-			world.setGameRule(rule, i);
+			Integer current = world.getGameRuleValue(rule);
+			if (!i.equals(current)) {
+				world.setGameRule(rule, i);
+			}
 		}
 	}
 
@@ -163,24 +171,12 @@ public class ServerStateManager implements Listener {
 		@Override
 		public void apply(World world, Object rawValue) {
 			if (rawValue instanceof Boolean b) {
-				if (!b) {
-					world.setGameRule(rule, 0);
-					return;
-				}
+				Integer target = b ? rule.getDefaultValue() : 0;
 
-				Integer def = rule.getDefaultValue();
-				if (def != null) {
-					world.setGameRule(rule, def);
-					return;
+				Integer current = world.getGameRuleValue(rule);
+				if (!target.equals(current)) {
+					world.setGameRule(rule, target);
 				}
-
-				Integer cur = world.getGameRuleValue(rule);
-				if (cur != null) {
-					world.setGameRule(rule, cur);
-					return;
-				}
-
-				world.setGameRule(rule, 0);
 				return;
 			}
 
@@ -275,13 +271,12 @@ public class ServerStateManager implements Listener {
 	 * @param useOptimized true for optimized values, false for normal values
 	 */
 	private void applyGameRules(boolean useOptimized) {
-		for (GameRuleMapping mapping : GameRuleMapping.values()) {
-			mapping.applyToAllWorlds(useOptimized);
-		}
+		GameRuleMapping.applyAll(useOptimized);
 	}
 
 	private void stopAllPreGeneration() {
-		for (String worldName : commands.getActivePreGenWorlds()) {
+		String[] activeWorlds = commands.getActivePreGenWorlds().toArray(String[]::new);
+		for (String worldName : activeWorlds) {
 			World world = WorldRegistry.resolveWorld(worldName, false);
 			if (world != null) {
 				commands.getPreGenerator().disable(Bukkit.getConsoleSender(), world, false);
@@ -297,11 +292,11 @@ public class ServerStateManager implements Listener {
 					Bukkit.getRegionScheduler()
 					.execute(plugin, world, chunk.getX(), chunk.getZ(), () -> {
 						if (chunk.isLoaded()) {
-							world.unloadChunk(chunk);
+							world.unloadChunkRequest(chunk.getX(), chunk.getZ());
 						}
 					});
 				} else {
-					world.unloadChunk(chunk);
+					world.unloadChunkRequest(chunk.getX(), chunk.getZ());
 				}
 			}
 		}

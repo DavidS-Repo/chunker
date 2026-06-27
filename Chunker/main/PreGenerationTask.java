@@ -16,9 +16,10 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public class PreGenerationTask {
 
-	public volatile boolean enabled = false;
-	public volatile boolean complete = false;
+	public volatile boolean enabled;
+	public volatile boolean complete;
 	public int worldId;
+	public String worldName;
 	public World world;
 	public int parallelTasksMultiplier;
 	public int timeValue;
@@ -27,16 +28,17 @@ public class PreGenerationTask {
 	public int tasks;
 	public char timeUnit;
 	public long radius;
+	public long targetSideChunks;
 	public boolean forceChunkSafety;
 	public final AtomicLong submittedChunks = new AtomicLong();
 	public final AtomicInteger activeSafetyTasks = new AtomicInteger();
 	public final AtomicBoolean terminationStarted = new AtomicBoolean();
 	public final LongAdder totalChunksProcessed = new LongAdder();
 	public final LongAdder chunksThisCycle = new LongAdder();
-	public long localChunksThisCycle = 0;
+	public long localChunksThisCycle;
 	public long taskQueueTimer;
-	public long timerStart = 0;
-	public long timerEnd = 0;
+	public long timerStart;
+	public long timerEnd;
 	public final RegionChunkIterator chunkIterator = new RegionChunkIterator();
 	public final Object playerChunkLock = new Object();
 	public final Object2ObjectOpenHashMap<UUID, LongOpenHashSet> playerChunkMap = new Object2ObjectOpenHashMap<>();

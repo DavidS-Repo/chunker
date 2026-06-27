@@ -5,59 +5,45 @@ package main;
  */
 public final class RegionChunkIterator {
 	private static final int REGION_SIZE = 32;
-	private static final int DIRECTIONS_COUNT = 4;
+	private static final int REGION_MASK = REGION_SIZE - 1;
+	private static final int MAX_CHUNK_INDEX = (REGION_SIZE * REGION_SIZE) - 1;
 	private static final int[] DX = {1, 0, -1, 0};
 	private static final int[] DZ = {0, 1, 0, -1};
 
-	private int currentRegionX = 0;
-	private int currentRegionZ = 0;
-	private int directionIndex = 0;
+	private int currentRegionX;
+	private int currentRegionZ;
+	private int directionIndex;
 	private int stepsRemaining = 1;
 	private int stepsToChange = 1;
-	private int chunkX = 0;
-	private int chunkZ = 0;
+	private int chunkIndex;
+	private boolean bounded;
+	private int minChunkX;
+	private int maxChunkX;
+	private int minChunkZ;
+	private int maxChunkZ;
 
 	/**
 	 * Retrieves the next chunk coordinates in the spiral order.
 	 *
-	 * @return the next chunk’s global coordinates along with a flag indicating a new region, or null if traversal is complete
+	 * @return the next chunk coordinates with a flag indicating region completion, or null if traversal is complete
 	 */
 	public synchronized NextChunkResult getNextChunkCoordinates() {
-		if (isRegionComplete()) {
-			moveToNextRegion();
-			chunkX = 0;
-			chunkZ = 0;
-			if (isTraversalComplete()) {
-				return null;
+		boolean regionCompleted = false;
+		while (true) {
+			if (chunkIndex > MAX_CHUNK_INDEX) {
+				moveToNextRegion();
+				chunkIndex = 0;
+				if (isTraversalComplete()) {
+					return null;
+				}
+				regionCompleted = true;
 			}
-			return new NextChunkResult(ChunkPos.get(globalX(), globalZ()), true);
-		}
-		NextChunkResult result = new NextChunkResult(ChunkPos.get(globalX(), globalZ()), false);
-		advanceChunk();
-		return result;
-	}
 
-	/**
-	 * Determines if the current region's chunk iteration is complete.
-	 *
-	 * @return true if all chunks in the region have been iterated
-	 */
-	private boolean isRegionComplete() {
-		return chunkX >= REGION_SIZE && chunkZ >= REGION_SIZE;
-	}
-
-	/**
-	 * Advances the chunk coordinates within the current region.
-	 */
-	private void advanceChunk() {
-		chunkZ++;
-		if (chunkZ >= REGION_SIZE) {
-			chunkZ = 0;
-			chunkX++;
-		}
-		if (chunkX >= REGION_SIZE) {
-			chunkX = REGION_SIZE;
-			chunkZ = REGION_SIZE;
+			NextChunkResult result = newResult(regionCompleted);
+			chunkIndex++;
+			if (!bounded || isInsideBounds(result.chunkX, result.chunkZ)) {
+				return result;
+			}
 		}
 	}
 
@@ -66,7 +52,7 @@ public final class RegionChunkIterator {
 	 */
 	private void moveToNextRegion() {
 		if (stepsRemaining == 0) {
-			directionIndex = (directionIndex + 1) & (DIRECTIONS_COUNT - 1);
+			directionIndex = (directionIndex + 1) & 3;
 			if ((directionIndex & 1) == 0) {
 				stepsToChange++;
 			}
@@ -86,18 +72,16 @@ public final class RegionChunkIterator {
 		return false;
 	}
 
-	/**
-	 * Computes the global x-coordinate.
-	 */
-	private int globalX() {
-		return (currentRegionX << 5) + chunkX;
+	private boolean isInsideBounds(int chunkX, int chunkZ) {
+		return chunkX >= minChunkX && chunkX <= maxChunkX && chunkZ >= minChunkZ && chunkZ <= maxChunkZ;
 	}
 
-	/**
-	 * Computes the global z-coordinate.
-	 */
-	private int globalZ() {
-		return (currentRegionZ << 5) + chunkZ;
+	private NextChunkResult newResult(boolean regionCompleted) {
+		int localX = chunkIndex >> 5;
+		int localZ = chunkIndex & REGION_MASK;
+		int globalX = (currentRegionX << 5) + localX;
+		int globalZ = (currentRegionZ << 5) + localZ;
+		return new NextChunkResult(globalX, globalZ, regionCompleted);
 	}
 
 	/**
@@ -109,8 +93,7 @@ public final class RegionChunkIterator {
 		directionIndex = 0;
 		stepsRemaining = 1;
 		stepsToChange = 1;
-		chunkX = 0;
-		chunkZ = 0;
+		chunkIndex = 0;
 	}
 
 	/**
@@ -125,8 +108,19 @@ public final class RegionChunkIterator {
 		directionIndex = 0;
 		stepsRemaining = 1;
 		stepsToChange = 1;
-		chunkX = 0;
-		chunkZ = 0;
+		chunkIndex = 0;
+	}
+
+	public synchronized void setChunkBounds(int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
+		this.minChunkX = minChunkX;
+		this.maxChunkX = maxChunkX;
+		this.minChunkZ = minChunkZ;
+		this.maxChunkZ = maxChunkZ;
+		this.bounded = true;
+	}
+
+	public synchronized void clearChunkBounds() {
+		this.bounded = false;
 	}
 
 	/**
@@ -137,26 +131,15 @@ public final class RegionChunkIterator {
 	 * @param directionIndex the current direction index
 	 * @param stepsRemaining the steps remaining in the current direction
 	 * @param stepsToChange  the number of steps before changing direction
-	 * @param chunkIndex     the chunk index within the region (encoded as (chunkX << 5) | chunkZ)
+	 * @param chunkIndex     the chunk index within the region
 	 */
 	public synchronized void setState(int currentRegionX, int currentRegionZ, int directionIndex, int stepsRemaining, int stepsToChange, int chunkIndex) {
 		this.currentRegionX = currentRegionX;
 		this.currentRegionZ = currentRegionZ;
-		this.directionIndex = directionIndex;
-		this.stepsRemaining = stepsRemaining;
-		this.stepsToChange = stepsToChange;
-
-		if (chunkIndex < 0) {
-			chunkIndex = 0;
-		} else {
-			int maxIndex = (REGION_SIZE * REGION_SIZE) - 1; // 1023
-			if (chunkIndex > maxIndex) {
-				chunkIndex = maxIndex;
-			}
-		}
-
-		this.chunkX = chunkIndex >> 5;
-		this.chunkZ = chunkIndex & 31;
+		this.directionIndex = directionIndex & 3;
+		this.stepsRemaining = Math.max(0, stepsRemaining);
+		this.stepsToChange = Math.max(1, stepsToChange);
+		this.chunkIndex = clampChunkIndex(chunkIndex);
 	}
 
 	public synchronized int getCurrentRegionX() {
@@ -180,30 +163,30 @@ public final class RegionChunkIterator {
 	}
 
 	/**
-	 * Returns the current chunk index within the region (encoded as (chunkX << 5) | chunkZ).
+	 * Returns the current chunk index within the region.
 	 */
 	public synchronized int getChunkIndex() {
-		int x = chunkX;
-		int z = chunkZ;
+		return clampChunkIndex(chunkIndex);
+	}
 
-		if (x < 0) x = 0;
-		if (z < 0) z = 0;
-
-		if (x >= REGION_SIZE) x = REGION_SIZE - 1;
-		if (z >= REGION_SIZE) z = REGION_SIZE - 1;
-
-		return (x << 5) | z;
+	private static int clampChunkIndex(int value) {
+		if (value < 0) return 0;
+		return Math.min(value, MAX_CHUNK_INDEX);
 	}
 
 	/**
-	 * Represents the result of getting the next chunk, including whether a region was completed.
+	 * Represents the next chunk coordinates, kept primitive to avoid ChunkPos and boxed Long churn in the hot path.
 	 */
 	public static final class NextChunkResult {
-		public final ChunkPos chunkPos;
+		public final int chunkX;
+		public final int chunkZ;
+		public final long packedKey;
 		public final boolean regionCompleted;
 
-		public NextChunkResult(ChunkPos chunkPos, boolean regionCompleted) {
-			this.chunkPos = chunkPos;
+		public NextChunkResult(int chunkX, int chunkZ, boolean regionCompleted) {
+			this.chunkX = chunkX;
+			this.chunkZ = chunkZ;
+			this.packedKey = MortonCode.encode(chunkX, chunkZ);
 			this.regionCompleted = regionCompleted;
 		}
 	}

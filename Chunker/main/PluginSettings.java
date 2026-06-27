@@ -13,9 +13,9 @@ public class PluginSettings {
 	private final JavaPlugin plugin;
 	private final CustomConfig settingsLoader;
 	private final CustomConfig optimizationsLoader;
-	private static YamlConfiguration settingsConfig;
-	private static YamlConfiguration optimizationsConfig;
-	private static boolean initialized = false;
+	private static volatile YamlConfiguration settingsConfig;
+	private static volatile YamlConfiguration optimizationsConfig;
+	private static volatile boolean initialized;
 
 	/**
 	 * Represents all configurable game rules with their default values.
@@ -39,6 +39,7 @@ public class PluginSettings {
 		private final Object optimizedDefault;
 		private final Object normalDefault;
 		private final boolean managedByDefault;
+		private static final GameRule[] CACHED_VALUES = values();
 
 		GameRule(String key, Object optimizedDefault, Object normalDefault, boolean managedByDefault) {
 			this.key = key;
@@ -189,13 +190,13 @@ public class PluginSettings {
 
 	private YamlConfiguration loadYamlConfig(CustomConfig loader) {
 		String raw = loader.loadConfig();
-		return (raw == null || raw.trim().isEmpty())
+		return (raw == null || raw.isBlank())
 				? new YamlConfiguration()
 						: YamlConfiguration.loadConfiguration(new StringReader(raw));
 	}
 
 	private void populateGameRuleDefaults() {
-		for (GameRule rule : GameRule.values()) {
+		for (GameRule rule : GameRule.CACHED_VALUES) {
 			optimizationsConfig.addDefault(rule.getManagementKey(), rule.managedByDefault);
 			optimizationsConfig.addDefault(rule.getOptimizedKey(), rule.optimizedDefault);
 			optimizationsConfig.addDefault(rule.getNormalKey(), rule.normalDefault);

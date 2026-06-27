@@ -75,6 +75,10 @@ public final class WorldRegistry {
 		return List.of(stateFile(plugin, world));
 	}
 
+	public static List<File> stateFiles(JavaPlugin plugin, String worldId) {
+		return List.of(stateFile(plugin, worldId));
+	}
+
 	public static List<File> stateFilesForInput(JavaPlugin plugin, String input) {
 		NamespacedKey key = parseKey(input);
 		if (key == null) return List.of();

@@ -148,8 +148,12 @@ public class ConsoleColorUtils {
 			int width,
 			ColorPair... formats) {
 		String ansi = combineAnsi(baseColor, formats);
-		String padded = String.format("%-" + width + "s", value);
-		return ansi + padded + COLOR_RESET.getAnsi();
+		String text = String.valueOf(value);
+		int pad = width - text.length();
+		if (pad <= 0) {
+			return ansi + text + COLOR_RESET.getAnsi();
+		}
+		return ansi + text + " ".repeat(pad) + COLOR_RESET.getAnsi();
 	}
 
 	/**
@@ -213,7 +217,7 @@ public class ConsoleColorUtils {
 			pre.append(f.getMinecraft());
 			suf.insert(0, f.getMinecraft());
 		}
-		return pre + msg + suf;
+		return pre.append(msg).append(suf).toString();
 	}
 
 	/**

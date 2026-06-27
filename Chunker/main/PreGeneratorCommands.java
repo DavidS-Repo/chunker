@@ -1,6 +1,7 @@
 package main;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.command.Command;
@@ -9,7 +10,15 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.*;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import static main.ConsoleColorUtils.*;
 
 /**
@@ -17,19 +26,21 @@ import static main.ConsoleColorUtils.*;
  */
 public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	private final PreGenerator preGenerator;
-	private final JavaPlugin plugin; // Needed for data folder/location
+	private final JavaPlugin plugin;
 	private long currentBorderChunks;
 	private int delayAmount;
 	private long radiusAmount;
+	private long targetSideChunks;
 	private char delayUnit;
 	private char radiusUnit;
 
 	private static final int TICKS_PER_SECOND = 20;
 	private static final int TICKS_PER_MINUTE = TICKS_PER_SECOND * 60;
 	private static final int TICKS_PER_HOUR   = TICKS_PER_MINUTE * 60;
+	private static final long GENERATION_EDGE_COMPENSATION_CHUNKS = 2L;
 
-	// keep track of which worlds have active pre-gen
-	private final Set<String> activePreGenWorlds = new HashSet<>();
+
+	private final Set<String> activePreGenWorlds = ConcurrentHashMap.newKeySet();
 
 	private static final String INVALID_INPUT = "Invalid numbers provided.";
 	private static final String COMMAND_USAGE = "Usage: /pregen <ParallelTasksMultiplier> <PrintUpdateDelayin(Seconds/Minutes/Hours)> <world> <Radius(Blocks/Chunks/Regions)> [safety]";
@@ -43,7 +54,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 
 	@Override
 	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-		// ----- /pregen reset [world] -----
 		if (cmd.getName().equalsIgnoreCase("pregen")) {
 			if (args.length == 2 && args[0].equalsIgnoreCase("reset")) {
 				if (!sender.hasPermission("chunker.reset")) {
@@ -59,7 +69,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				}
 				return true;
 			}
-			// ----- normal pregen -----
 			if (args.length == 4 || args.length == 5) {
 				handleEnableCommand(sender, args);
 			} else {
@@ -113,7 +122,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			if (args.length == 5 && !forceChunkSafety) {
 				return;
 			}
-
 			boolean started = preGenerator.enable(
 					sender,
 					threadCount,
@@ -121,14 +129,13 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 					printTicks,
 					world,
 					chunks,
+					targetSideChunks,
 					forceChunkSafety
 					);
 			if (started) {
 				activePreGenWorlds.add(worldName);
 				colorMessage(sender, GREEN, "pregeneration enabled for " + worldName);
 			}
-			// If not started, enable() already gave a radius/exceeded or "already enabled" warning.
-
 		} catch (NumberFormatException e) {
 			colorMessage(sender, RED, INVALID_INPUT);
 		}
@@ -138,13 +145,13 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	 * Turns off pre-gen for one world or all worlds.
 	 */
 	public void handleDisableCommand(CommandSender sender, String[] args) {
-		// global off
 		if (args.length == 0) {
 			if (activePreGenWorlds.isEmpty()) {
 				colorMessage(sender, YELLOW, DISABLED_WARNING);
 				return;
 			}
-			for (String worldName : activePreGenWorlds) {
+			String[] activeWorlds = activePreGenWorlds.toArray(String[]::new);
+			for (String worldName : activeWorlds) {
 				World w = WorldRegistry.resolveWorld(worldName, false);
 				if (w != null) {
 					preGenerator.disable(sender, w, true);
@@ -212,28 +219,43 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Converts radius input to total chunk count, rounding up to cover full regions from center.
+	 * Converts radius input to the chunk side length to request from the server.
+	 * Paper/Mojang generation expands about two chunks past requested chunks,
+	 * so explicit radii are reduced by two chunks on each edge.
 	 */
 	private long parseRadius(String input) {
 		try {
 			if (input.equalsIgnoreCase("default")) {
+				targetSideChunks = 0L;
 				return currentBorderChunks;
 			}
 			radiusAmount = Long.parseLong(input.substring(0, input.length() - 1));
 			radiusUnit   = Character.toLowerCase(input.charAt(input.length() - 1));
-			return switch (radiusUnit) {
-			case 'b' -> chunksForRegionSide(Math.ceilDiv(Math.multiplyExact(radiusAmount, 2L), 512L));
-			case 'c' -> chunksForRegionSide(Math.ceilDiv(Math.multiplyExact(radiusAmount, 2L), 32L));
-			case 'r' -> chunksForRegionSide(Math.multiplyExact(radiusAmount, 2L));
-			default -> -1;
+
+			long requestedSideChunks = switch (radiusUnit) {
+			case 'b' -> Math.ceilDiv(Math.multiplyExact(radiusAmount, 2L), 16L);
+			case 'c' -> Math.multiplyExact(radiusAmount, 2L);
+			case 'r' -> Math.multiplyExact(Math.multiplyExact(radiusAmount, 2L), 32L);
+			default -> -1L;
 			};
+			if (requestedSideChunks < 0L) return -1L;
+
+			targetSideChunks = compensatedSideChunks(requestedSideChunks);
+			if (targetSideChunks > Integer.MAX_VALUE) return -1L;
+			return chunksForChunkSide(targetSideChunks);
 		} catch (Exception e) {
+			targetSideChunks = 0L;
 			return -1;
 		}
 	}
 
-	private long chunksForRegionSide(long sideRegions) {
-		long sideChunks = Math.multiplyExact(sideRegions, 32L);
+	private long compensatedSideChunks(long requestedSideChunks) {
+		if (requestedSideChunks <= 0L) return 0L;
+		long compensation = Math.multiplyExact(GENERATION_EDGE_COMPENSATION_CHUNKS, 2L);
+		return Math.max(1L, Math.subtractExact(requestedSideChunks, compensation));
+	}
+
+	private long chunksForChunkSide(long sideChunks) {
 		return Math.multiplyExact(sideChunks, sideChunks);
 	}
 
@@ -257,9 +279,8 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		}
 		int totalCores = PluginSettings.getAvailableProcessors();
 		int autoCount  = 0;
-		Map<String, Integer> coresByWorld = new HashMap<>();
+		Object2IntOpenHashMap<String> coresByWorld = new Object2IntOpenHashMap<>();
 
-		// collect fixed cores
 		for (String name : allWorldNames) {
 			if (!PluginSettings.getAutoRun(name)) continue;
 			String mult = PluginSettings.getParallelTasksMultiplier(name);
@@ -276,7 +297,6 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 				autoCount++;
 			}
 		}
-		// split remaining cores
 		int coresPerAuto = autoCount > 0 ? Math.max(1, totalCores / autoCount) : 0;
 		for (String name : allWorldNames) {
 			if (PluginSettings.getAutoRun(name)
@@ -287,8 +307,7 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 		if (coresByWorld.isEmpty()) return;
 		boolean noPlayers = Bukkit.getOnlinePlayers().isEmpty();
 
-		// kick off each world
-		for (Map.Entry<String, Integer> entry : coresByWorld.entrySet()) {
+		for (Object2IntMap.Entry<String> entry : coresByWorld.object2IntEntrySet()) {
 			if (!noPlayers) break;
 			String worldName = entry.getKey();
 			World world = WorldRegistry.resolveWorld(worldName, false);
@@ -312,11 +331,12 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 
 			boolean started = preGenerator.enable(
 					sender,
-					entry.getValue(),
+					entry.getIntValue(),
 					delayUnit, delayAmount,
 					printTicks,
 					world,
 					chunks,
+					targetSideChunks,
 					false
 					);
 
@@ -328,15 +348,25 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 	}
 
 	/**
-	 * Calculate how many chunks fit inside the world border.
+	 * Calculate how many chunks intersect the world border without adding the old edge padding.
 	 */
 	public long calculateChunksInBorder(World world) {
 		WorldBorder border = world.getWorldBorder();
-		double diameter   = border.getSize();
-		double halfBlocks = diameter / 2.0;
-		double halfChunks = Math.ceil(halfBlocks / 16.0);
-		long sideChunks = (long) (halfChunks * 2 + 1);
-		return Math.multiplyExact(sideChunks, sideChunks);
+		Location center = border.getCenter();
+		double halfBlocks = border.getSize() * 0.5D;
+
+		int minChunkX = chunkAtBlock(center.getX() - halfBlocks);
+		int maxChunkX = chunkAtBlock(Math.nextDown(center.getX() + halfBlocks));
+		int minChunkZ = chunkAtBlock(center.getZ() - halfBlocks);
+		int maxChunkZ = chunkAtBlock(Math.nextDown(center.getZ() + halfBlocks));
+
+		long chunksX = (long) maxChunkX - minChunkX + 1L;
+		long chunksZ = (long) maxChunkZ - minChunkZ + 1L;
+		return Math.multiplyExact(chunksX, chunksZ);
+	}
+
+	private static int chunkAtBlock(double blockCoordinate) {
+		return (int) Math.floor(blockCoordinate / 16.0D);
 	}
 
 	@Override
@@ -348,15 +378,15 @@ public class PreGeneratorCommands implements CommandExecutor, TabCompleter {
 			) {
 		if (command.getName().equalsIgnoreCase("pregen")) {
 			if (args.length == 1) {
-				return Arrays.asList("<ParallelTasksMultiplier>", "reset");
+				return List.of("<ParallelTasksMultiplier>", "reset");
 			}
 			if (args.length == 2 && args[0].equalsIgnoreCase("reset")) {
-				return filterCompletions(getPregeneratorWorlds(plugin), args[1]); // dimensions with data files
+				return filterCompletions(getPregeneratorWorlds(plugin), args[1]);
 			}
-			if (args.length == 2) return Collections.singletonList("<PrintUpdateDelayin(Seconds/Minutes/Hours)>");
+			if (args.length == 2) return List.of("<PrintUpdateDelayin(Seconds/Minutes/Hours)>");
 			if (args.length == 3) return filterCompletions(getWorldSuggestions(), args[2]);
-			if (args.length == 4) return Arrays.asList("<Radius(Blocks/Chunks/Regions)>", "default");
-			if (args.length == 5) return filterCompletions(Collections.singletonList("safety"), args[4]);
+			if (args.length == 4) return List.of("<Radius(Blocks/Chunks/Regions)>", "default");
+			if (args.length == 5) return filterCompletions(List.of("safety"), args[4]);
 		}
 		if (command.getName().equalsIgnoreCase("pregenoff")) {
 			if (args.length == 1) return filterCompletions(getWorldSuggestions(), args[0]);
