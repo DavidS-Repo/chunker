@@ -1,9 +1,9 @@
 name: Chunker
-version: 26.2
+version: 26.3
 main: main.Chunker
 author: Go0fy_Go0ber
 description: Fast and Efficient Async Minecraft World Pre-generator
-api-version: '26.1'
+api-version: '26.3'
 folia-supported: true
 paperweight-mappings-namespace: mojang
 commands:
