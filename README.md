@@ -16,7 +16,7 @@ Quick checklist:
 
 ## Supported MC Versions
 
-- Target version: `26.2`
+- Target version: `26.3`
 - Requires Java 25
 - Older Minecraft/Java 21 server versions are no longer supported by this build
 
@@ -26,7 +26,7 @@ Quick checklist:
 - Folia
 - Paper-compatible forks such as Pufferfish, Purpur, and Leaf
 
-Chunker still has fallback logic for non-Paper server paths, but the current plugin baseline is built for the `26.2` API and Java 25.
+Chunker still has fallback logic for non-Paper server paths, but the current plugin baseline is built for the `26.3` API and Java 25.
 
 <div style="display: flex; justify-content: space-between; width: 100% !important;">
     <img src="https://www.davids-repo.dev/mc/chunker1.png" style="width: 49% !important; height: auto;">

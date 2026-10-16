@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>Chunker</groupId>
     <artifactId>Chunker</artifactId>
-    <version>26.2</version>
+    <version>26.3</version>
     <name>Chunker</name>
     <description>Fast and Efficient Async Minecraft World Pre-generator</description>
     <properties>
@@ -27,13 +27,13 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>[26.1.build,)</version>
+            <version>[26.3.build,)</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>dev.folia</groupId>
             <artifactId>folia-api</artifactId>
-            <version>[26.1.build,)</version>
+            <version>[26.3.build,)</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -44,7 +44,7 @@
         </dependency>
     </dependencies>
     <build>
-        <sourceDirectory>src</sourceDirectory>
+        <sourceDirectory>main</sourceDirectory>
         <resources>
             <resource>
                 <directory>${project.basedir}</directory>
@@ -52,7 +52,6 @@
                     <include>plugin.yml</include>
                     <include>settings.yml</include>
                     <include>optimizations.yml</include>
-                    <include>main/**</include>
                 </includes>
             </resource>
         </resources>
