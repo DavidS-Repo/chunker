@@ -10,6 +10,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.world.ChunkUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.concurrent.CompletableFuture;
@@ -453,24 +454,45 @@ public class PreGenerator implements Listener {
 	 */
 	private void processChunkFolia(PreGenerationTask task, int chunkX, int chunkZ) {
 		if (!task.enabled) return;
-		Bukkit.getRegionScheduler().execute(plugin, task.world, chunkX, chunkZ, () -> {
-			if (!task.enabled) return;
-			task.world.getChunkAtAsync(chunkX, chunkZ, true).thenAccept(chunk -> {
-				if (!task.enabled) return;
-				Bukkit.getRegionScheduler().execute(plugin, task.world, chunkX, chunkZ, () -> {
-					if (!task.enabled) return;
-					if (chunk != null && chunk.isLoaded()) {
-						task.world.unloadChunkRequest(chunkX, chunkZ);
+		if (!MemoryGuard.getInstance().reserveSlot(() -> task.enabled)) return;
+		try {
+			Bukkit.getRegionScheduler().execute(plugin, task.world, chunkX, chunkZ, () -> {
+				if (!task.enabled) {
+					MemoryGuard.getInstance().releaseSlot();
+					return;
+				}
+				task.world.getChunkAtAsync(chunkX, chunkZ, true).thenAccept(chunk -> {
+					if (!task.enabled) {
+						MemoryGuard.getInstance().releaseSlot();
+						return;
 					}
-					markChunkProcessed(task);
+					Bukkit.getRegionScheduler().execute(plugin, task.world, chunkX, chunkZ, () -> {
+						try {
+							if (!task.enabled) return;
+							if (chunk != null && chunk.isLoaded()) {
+								task.world.unloadChunkRequest(chunkX, chunkZ);
+							}
+							markChunkProcessed(task);
+						} finally {
+							MemoryGuard.getInstance().releaseSlot();
+						}
+					});
+				}).exceptionally(ex -> {
+					try {
+						exceptionMsg("Async chunk load exception in processChunkFolia: " + ex.getMessage());
+						ex.printStackTrace();
+						markChunkProcessed(task);
+					} finally {
+						MemoryGuard.getInstance().releaseSlot();
+					}
+					return null;
 				});
-			}).exceptionally(ex -> {
-				exceptionMsg("Async chunk load exception in processChunkFolia: " + ex.getMessage());
-				ex.printStackTrace();
-				markChunkProcessed(task);
-				return null;
 			});
-		});
+		} catch (RuntimeException e) {
+			MemoryGuard.getInstance().releaseSlot();
+			exceptionMsg("Exception scheduling Folia chunk task: " + e.getMessage());
+			e.printStackTrace();
+		}
 	}
 
 	/**
@@ -482,6 +504,7 @@ public class PreGenerator implements Listener {
 			processChunkPaperWithSafety(task, chunkX, chunkZ);
 			return;
 		}
+		if (!MemoryGuard.getInstance().reserveSlot(() -> task.enabled)) return;
 		getChunkAsync(task, chunkX, chunkZ, true);
 		markChunkProcessed(task);
 	}
@@ -490,14 +513,20 @@ public class PreGenerator implements Listener {
 	 * Runs safety-mode chunk generation and counts progress only after the safety future completes.
 	 */
 	private CompletableFuture<Void> processChunkPaperWithSafety(PreGenerationTask task, int chunkX, int chunkZ) {
+		if (!task.enabled) return CompletableFuture.completedFuture(null);
+		if (!MemoryGuard.getInstance().reserveSlot(() -> task.enabled)) return CompletableFuture.completedFuture(null);
 		task.activeSafetyTasks.incrementAndGet();
 		return getChunkAsyncWithSafety(task, chunkX, chunkZ, true).whenComplete((_, ex) -> {
-			if (ex != null) {
-				Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-				exceptionMsg("Chunk safety generation failed for " + task.worldName + " at " + chunkX + "," + chunkZ + ": " + cause.getMessage());
+			try {
+				if (ex != null) {
+					Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+					exceptionMsg("Chunk safety generation failed for " + task.worldName + " at " + chunkX + "," + chunkZ + ": " + cause.getMessage());
+				}
+				markChunkProcessed(task);
+				finishSafetyChunk(task);
+			} finally {
+				MemoryGuard.getInstance().releaseSlot();
 			}
-			markChunkProcessed(task);
-			finishSafetyChunk(task);
 		});
 	}
 
@@ -527,10 +556,15 @@ public class PreGenerator implements Listener {
 	private void syncProcess(PreGenerationTask task) {
 		try {
 			if (!task.enabled) return;
-			RegionChunkIterator.NextChunkResult next = nextChunkOrFinish(task);
-			if (next == null) return;
-			handleChunkBukkit(task, next.chunkX, next.chunkZ);
-			completionCheck(task);
+			if (!MemoryGuard.getInstance().tryReserveSlot()) return;
+			try {
+				RegionChunkIterator.NextChunkResult next = nextChunkOrFinish(task);
+				if (next == null) return;
+				handleChunkBukkit(task, next.chunkX, next.chunkZ);
+				completionCheck(task);
+			} finally {
+				MemoryGuard.getInstance().releaseSlot();
+			}
 		} catch (Exception e) {
 			exceptionMsg("Exception in syncProcess: " + e.getMessage());
 			e.printStackTrace();
@@ -568,14 +602,27 @@ public class PreGenerator implements Listener {
 	 * Loads a chunk on Paper using the async API directly.
 	 */
 	private void getChunkAsync(PreGenerationTask task, int chunkX, int chunkZ, boolean gen) {
-		if (!task.enabled) return;
+		if (!task.enabled) {
+			MemoryGuard.getInstance().releaseSlot();
+			return;
+		}
 		try {
-			task.world.getChunkAtAsync(chunkX, chunkZ, gen, chunk -> {
-				if (chunk != null && chunk.isLoaded()) {
-					task.world.unloadChunkRequest(chunkX, chunkZ);
+			task.world.getChunkAtAsync(chunkX, chunkZ, gen, true).whenComplete((chunk, ex) -> {
+				try {
+					if (ex != null) {
+						Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+						exceptionMsg("Async chunk load failed for " + task.worldName + " at " + chunkX + "," + chunkZ + ": " + cause.getMessage());
+						return;
+					}
+					if (chunk != null && chunk.isLoaded()) {
+						task.world.unloadChunkRequest(chunkX, chunkZ);
+					}
+				} finally {
+					MemoryGuard.getInstance().releaseSlot();
 				}
 			});
 		} catch (Exception e) {
+			MemoryGuard.getInstance().releaseSlot();
 			exceptionMsg("Exception in getChunkAsync: " + e.getMessage());
 			e.printStackTrace();
 		}
@@ -648,6 +695,31 @@ public class PreGenerator implements Listener {
 			}
 		} catch (Exception e) {
 			exceptionMsg("Exception in handleChunkLoad: " + e.getMessage());
+			e.printStackTrace();
+		}
+	}
+
+	/**
+	 * Clears pinned entries once a chunk is unloaded so the pinned set cannot
+	 * grow without bound during long pre-generation runs.
+	 */
+	@EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+	private void onChunkUnload(ChunkUnloadEvent event) {
+		try {
+			Chunk chunk = event.getChunk();
+			if (chunk == null) return;
+			PreGenerationTask task;
+			int worldId = WorldIdManager.getWorldId(event.getWorld());
+			synchronized (tasksLock) {
+				task = tasks.get(worldId);
+			}
+			if (task == null) return;
+			long key = MortonCode.encode(chunk.getX(), chunk.getZ());
+			synchronized (task.playerChunkLock) {
+				task.pinnedNewChunks.remove(key);
+			}
+		} catch (Exception e) {
+			exceptionMsg("Exception in onChunkUnload: " + e.getMessage());
 			e.printStackTrace();
 		}
 	}
